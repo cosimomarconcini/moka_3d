@@ -45,6 +45,8 @@ moka3d/
 
 Clone the repository:
 
-```bash
-git clone https://github.com/yourusername/moka3d.git
+from terminal run:
+
+git clone https://github.com/cosimomarconcini/moka_3d.git
 cd moka3d
+
