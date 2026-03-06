@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Mar  6 11:38:07 2026
+
+@author: cosimo
+"""
+
+DEFAULT_CONFIG_YAML = """\
+paths:
+  data_dir: ./Data
+  ancillary_dir: ./Ancillary_material
+  output_dir: ./Outputs
+
+input:
+  cube_file: NGC7582_test_OIII_smooth.fits
+  sn_map: SN_map_NGC7582.fits
+  save_all_outputs: false
+
+target:
+  agn_ra: 349.598450
+  agn_dec: -42.370420
+  center_mode: null
+  center_xy_manual: null
+  redshift: 0.005410
+
+line:
+  wavelength_line: 5006.8
+  wavelength_line_unit: Angstrom
+
+processing:
+  sn_thresh: 3
+  nrebin: 1
+  xrange: null
+  yrange: null
+  percentile_shown_mom_maps:
+    - [1, 99]
+    - [5, 95]
+    - [1, 99]
+  psf_sigma: 1.0
+  lsf_sigma: 72.0
+  vel_sigma: 0.0
+  logradius: false
+
+maps:
+  fluxmap: null
+  velmap: null
+  sigmap: null
+
+fit:
+  component_mode: disk_then_outflow
+  radius_range_model_disc: [0.0, 40.0]
+  radius_range_model_out: [0.0, 30.0]
+  num_shells_disc: 30
+  num_shells_out: 30
+  beta_grid_disc: [50, 100, 5]
+  v_grid_disc: [0, 400, 20]
+  outflow_pa_deg: 105.0
+  outflow_opening_deg: 120.0
+  outflow_double_cone: true
+  outflow_mask_mode: bicone
+  beta_grid_out: [50, 130, 5]
+  v_grid_out: [100, 1300, 20]
+
+advanced:
+  use_crps: false
+  crps_qgrid: [0.01, 0.063, 0.116, 0.169, 0.222, 0.275, 0.328, 0.381, 0.434, 0.487, 0.54, 0.593, 0.646, 0.699, 0.752, 0.805, 0.858, 0.911, 0.964]
+  perc_disc: [0.05, 0.95]
+  perc_out: [0.01, 0.99]
+  perc_weights: [1, 1]
+  npt: 200000
+  use_global_beta_disc: true
+  disc_fit_mode: independent
+  disc_geometry: cylindrical
+  disc_theta_range:
+    - [0, 1]
+  disc_phi_range:
+    - [0, 360]
+  disc_zeta_range_mode: auto_from_psf
+  disc_double_cone: false
+  use_global_beta_out: true
+  outflow_fit_mode: independent
+  out_geometry: spherical
+  mask_disk_with_outflow: true
+  mask_mode: zero
+  do_final_combined_model_plot: true
+  outflow_axis_sign: 1
+  resid_ranges: [0.15, 55, 55]
+
+output:
+  save_plots: true
+  show_plots: false
+  save_summary_json: true
+  save_run_config_copy: true
+  overwrite: true
+"""
