@@ -44,5 +44,16 @@ And fill this:
 Username: your GitHub username (not email, username)
 Password: the token
 
+# Run MOKA 3D
+
+Move to the pulled folder:
+
 cd moka3d
+
+Then test moka3d. This will run the config_basic.yaml file with all the necessary info on your data and fit type.
+
+moka3d run config_basic.yaml 
+
+
+
 
