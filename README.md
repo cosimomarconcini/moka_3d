@@ -50,6 +50,12 @@ Move to the pulled folder:
 
 cd moka3d
 
+Install the required packages:
+
+conda install pip
+
+python -m pip install -e .
+
 Then test moka3d. This will run the config_basic.yaml file with all the necessary info on your data and fit type.
 
 moka3d run config_basic.yaml 
