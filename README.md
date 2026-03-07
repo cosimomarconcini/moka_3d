@@ -32,11 +32,17 @@ conda create --name moka3d_env
 Then activate it:
 conda activate moka3d_env
 
-Then, clone the MOKA 3D repository.
+Then, clone the MOKA 3D repository. For now this repo is private to to clone it you will need a personal token, you can do it like this:
+Settings--> Developer settings --> Personal access tokens --> Tokens --> Generate new token 
 
-from terminal run:
+Then, from terminal run:
 
 git clone https://github.com/cosimomarconcini/moka_3d.git
+
+And fill this:
+
+Username: your GitHub username (not email, username)
+Password: the token
 
 cd moka3d
 
