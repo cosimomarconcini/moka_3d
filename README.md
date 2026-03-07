@@ -29,15 +29,14 @@ Typical applications include:
 I suggest to create a new environment and then install MOKA 3D as explained in the following.
 E.g.:
 conda create --name moka3d_env
-Then activate it;
+Then activate it:
 conda activate moka3d_env
 
-
-Clone the repository:
+Then, clone the MOKA 3D repository.
 
 from terminal run:
 
-git clone https://github.com/cosimomarconcini/moka_3d.git\\
+git clone https://github.com/cosimomarconcini/moka_3d.git
 
 cd moka3d
 
