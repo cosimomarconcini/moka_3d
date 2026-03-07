@@ -24,23 +24,7 @@ Typical applications include:
 - Command-line interface for reproducible workflows
 
 ---
-# Layout
-moka3d/
-├── src/moka3d/           
-│   ├── cli.py
-│   ├── config.py
-│   ├── defaults.py
-│   ├── pipeline.py
-│   ├── plotting.py
-│   ├── moka3d_source.py
-│   └── rotation_curves.py
-│
-├── examples/             
-│   └── config_basic.yaml
-│
-├── Data/                 Input FITS cubes
-├── Ancillary_material/   SN maps or other auxiliary data
-├── Outputs/              
+        
 # Installation
 
 Clone the repository:
