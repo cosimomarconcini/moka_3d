@@ -33,7 +33,7 @@ Then activate it:
 conda activate moka3d_env
 
 Then, clone the MOKA 3D repository. For now this repo is private to to clone it you will need a personal token, you can do it like this:
-Settings--> Developer settings --> Personal access tokens --> Tokens --> Generate new token 
+Click your profile picture at the top right --> Settings --> Scroll down the left panel --> Developer settings --> Personal access tokens --> Tokens (classic) --> Generate new token (classic) --> select only 'repo' --> give it a random name --> scroll down and create token --> save token 
 
 Then, from terminal run:
 
