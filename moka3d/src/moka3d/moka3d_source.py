@@ -1,23 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Sat Dec 11 15:33:34 2021
+Created on Wed Feb 4 15:31:00 2026
 
-@author: marconi
+@author: cm
 """
 
-
+from pathlib import Path
 import matplotlib.pyplot as plt
-
 import numpy as np
 from numpy import radians as rad
-import sys
 from astropy.io import fits
-import rotations as rot
-import amgraphics as amg
+from . import rotations as rot
+from . import amgraphics as amg
 import fast_histogram as fh
 from matplotlib import colors
-import rotation_curves as rc
+from . import rotation_curves as rc
 from astropy.cosmology import Planck18 as cosmo
 from astropy import units as u
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -29,6 +27,9 @@ from matplotlib.patches import Rectangle
 import math
 import os
 from scipy.ndimage import gaussian_filter
+from rich.progress import Progress, BarColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
+import logging
+logger = logging.getLogger(__name__)
 
 from astropy.wcs import WCS
 from astropy.coordinates import SkyCoord
@@ -109,27 +110,89 @@ class utils():
 
     def kin_maps(self, fluxthr=1e-10, domap=None):
         """
-        Create moment maps from model cube and save them 
-        in model dictionary, to be able to reuse them
+        Create moment maps from model cube and save them
+        in model dictionary, to be able to reuse them.
         """
-       
-        data = np.vstack([self.yobs_psf, self.xobs_psf]).T # Y, X
-        map0 = fh.histogramdd(data, bins=self.cube['nbins'][1:], range=self.cube['range'][1:], weights=self.flux)
-        map1 = fh.histogramdd(data, bins=self.cube['nbins'][1:], range=self.cube['range'][1:], weights=self.flux*self.vlos_lsf)
-        
-        kmap= {}
-        kmap['flux'] = map0
-        w = (kmap['flux'] < fluxthr *np.nanmax(kmap['flux'])) | (kmap['flux'] == np.nan)
-        kmap['flux'][w]=np.nan
-        
-        if domap == 'all' or domap == 'vel':
-            kmap['vel'] = map1/map0 # 1st moment = int(v*F)/int(Fdv) = int(F*vdv)/mom0
-            kmap['vel'][w]=np.nan
-        
-        if domap == 'all' or domap == 'sig':
-            map2 = fh.histogramdd(data, bins=self.cube['nbins'][1:], range=self.cube['range'][1:], weights=self.flux*self.vlos_lsf**2)
-            kmap['sig'] = (map2/map0-kmap['vel']**2)**0.5
-            kmap['sig'][w]=np.nan
+
+        data = np.vstack([self.yobs_psf, self.xobs_psf]).T  # Y, X
+
+        map0 = fh.histogramdd(
+            data,
+            bins=self.cube["nbins"][1:],
+            range=self.cube["range"][1:],
+            weights=self.flux,
+        )
+
+        map1 = fh.histogramdd(
+            data,
+            bins=self.cube["nbins"][1:],
+            range=self.cube["range"][1:],
+            weights=self.flux * self.vlos_lsf,
+        )
+
+        kmap = {}
+        kmap["flux"] = np.array(map0, dtype=float, copy=True)
+
+        # Pixels where flux is invalid or too low
+        flux_max = np.nanmax(kmap["flux"])
+        w = (~np.isfinite(kmap["flux"])) | (kmap["flux"] <= 0)
+
+        if np.isfinite(flux_max) and flux_max > 0:
+            w |= (kmap["flux"] < fluxthr * flux_max)
+
+        kmap["flux"][w] = np.nan
+
+        need_vel = domap in ("all", "vel", "sig")
+        vel = None
+
+        if need_vel:
+            with np.errstate(divide="ignore", invalid="ignore"):
+                vel = np.divide(
+                    map1,
+                    map0,
+                    out=np.full_like(map1, np.nan, dtype=float),
+                    where=(~w) & np.isfinite(map0) & (map0 > 0),
+                )
+
+            vel[w] = np.nan
+
+            if domap in ("all", "vel"):
+                kmap["vel"] = vel
+
+        if domap in ("all", "sig"):
+            map2 = fh.histogramdd(
+                data,
+                bins=self.cube["nbins"][1:],
+                range=self.cube["range"][1:],
+                weights=self.flux * self.vlos_lsf**2,
+            )
+
+            if vel is None:
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    vel = np.divide(
+                        map1,
+                        map0,
+                        out=np.full_like(map1, np.nan, dtype=float),
+                        where=(~w) & np.isfinite(map0) & (map0 > 0),
+                    )
+                vel[w] = np.nan
+
+            with np.errstate(divide="ignore", invalid="ignore"):
+                second_moment = np.divide(
+                    map2,
+                    map0,
+                    out=np.full_like(map2, np.nan, dtype=float),
+                    where=(~w) & np.isfinite(map0) & (map0 > 0),
+                )
+
+            var = second_moment - vel**2
+            var[~np.isfinite(var)] = np.nan
+            var[var < 0] = np.nan
+
+            sig = np.sqrt(var)
+            sig[w] = np.nan
+            kmap["sig"] = sig
+
         self.maps = kmap
         
             
@@ -406,7 +469,7 @@ class utils():
         ax[2].set_xlabel(r'$\Delta X$ [arcsec]')
 
     
-        plt.show()
+        #plt.show()
         return maps
     
     def chan_maps(self, flrange=None, intervals=None, obs=False, residual = False, only_obs = False, cut_obs = False):
@@ -1345,7 +1408,7 @@ def pick_center(wcs2d, obscube, vel_kms, agn_ra, agn_dec, center_mode, center_xy
 def observed_wcs_params_from_vel(vel_kms, i0, x_cen, y_cen, pixscale, nrebin):
     """
     Build crpix/crval/cdelt for km.observed.
-    Anchor v=0 at i0. Keep dv sign consistent with velocity array.
+    Preserve the actual velocity axis defined in vel_kms.
     Returns: crpix, crval, cdelt, dv, ref_pix_0based, x0_bin, y0_bin
     """
     dv = float(np.nanmedian(np.diff(vel_kms)))
@@ -1355,7 +1418,7 @@ def observed_wcs_params_from_vel(vel_kms, i0, x_cen, y_cen, pixscale, nrebin):
 
     ref_pix_0based = int(i0)
     crpix_spec = float(ref_pix_0based + 1)  # FITS is 1-based
-    crval_spec = 0.0
+    crval_spec = float(vel_kms[ref_pix_0based])
 
     x0_bin = float(x_cen / nrebin)
     y0_bin = float(y_cen / nrebin)
@@ -1456,7 +1519,7 @@ def _parse_wavelength_input(wl_value, wl_unit_hint, target_unit):
 def observed_wcs_params(vel_kms, i0, x_cen, y_cen, pixscale, nrebin):
     """
     Build crpix/crval/cdelt for km.observed.
-    Anchor v=0 at i0.
+    Preserve the actual velocity axis; use i0 as the reference pixel.
     Keep dv sign consistent with velocity array.
     """
     dv = float(np.nanmedian(np.diff(vel_kms)))
@@ -1612,18 +1675,18 @@ def _set_linear_axis_keywords(header, axis_number_1based, crval, cdelt, crpix):
         header[dkkey] = float(cdelt)
 
 
-def apply_sn_mask_to_cube(obscube, sn_fits_path, SN_map,  sn_thresh):
+def apply_sn_mask_to_cube(obscube, sn_fits_path, SN_map, sn_thresh):
+
     # ---- do nothing if disabled ----
-    if sn_thresh is None :
-        print("SN masking skipped (SN_THRESH=None)")
+    if sn_thresh is None:
+        logger.info("SN masking skipped (sn_thresh=None)")
         return obscube
+
     if sn_fits_path is None or SN_map is None:
-        print("SN masking skipped (SN_THRESH=None)")
+        logger.info("SN masking skipped (no SN map provided)")
         return obscube
 
-    if sn_fits_path is not None:
-        sn_fits_path = sn_fits_path+SN_map
-
+    sn_fits_path = Path(sn_fits_path) / SN_map
 
     with fits.open(sn_fits_path) as hdusn:
         sn2d = np.array(hdusn[0].data, dtype=float)
@@ -1639,11 +1702,11 @@ def apply_sn_mask_to_cube(obscube, sn_fits_path, SN_map,  sn_thresh):
         )
 
     mask2d = (~np.isfinite(sn2d)) | (sn2d < sn_thresh)
+
     obscube[:, mask2d] = np.nan
-    if sn_thresh is not None:
-        print(
-            f"SN mask applied (threshold={sn_thresh}) "
-        )
+
+    logger.info("SN mask applied (threshold=%.2f)", sn_thresh)
+
     return obscube
 
 def _parse_cunit3_to_wavelength_unit(cunit3):
@@ -1764,7 +1827,7 @@ def sp_pl_compare(data_cube,
     ax.tick_params(axis='both', direction='in', labelsize=22, width=2)
     ax.legend(fontsize=16)
     plt.tight_layout()
-    plt.show()
+    #plt.show()
     
 def pa180_circ_mean_std(pa_deg):
     """
@@ -2309,7 +2372,7 @@ def estimate_pa_from_mom1(
 
         ax.set_aspect('equal')
         plt.tight_layout()
-        plt.show()
+        #plt.show()
         
     
     PA_sigma = np.nan
@@ -2705,9 +2768,9 @@ def plot_kin_maps_3x3(
     ax[0][1].set_title(r'Mom-1 (km s$^{-1}$)', fontsize=30)
     ax[0][2].set_title(r'Mom-2 (km s$^{-1}$)', fontsize=30)
 
-    ax[0][0].set_ylabel("DATA\n$\Delta$ Dec ['']", fontsize=28)
-    ax[1][0].set_ylabel("MODEL\n$\Delta$ Dec ['']", fontsize=28)
-    ax[2][0].set_ylabel("RESIDUAL\n$\Delta$ Dec ['']", fontsize=28)
+    ax[0][0].set_ylabel("DATA\n" + r"$\Delta$ Dec ['']", fontsize=28)
+    ax[1][0].set_ylabel("MODEL\n" + r"$\Delta$ Dec ['']", fontsize=28)
+    ax[2][0].set_ylabel("RESIDUAL\n" + r"$\Delta$ Dec ['']", fontsize=28)
 
     for j in range(3):
         ax[2][j].set_xlabel(r"$\Delta$ RA ['']", fontsize=28)
@@ -2831,7 +2894,7 @@ def plot_kin_maps_3x3(
         cax_res = fig.add_axes([x_cbar, y0_res, cbar_w, y1_res - y0_res])
         fig.colorbar(ims[2][j], cax=cax_res).ax.tick_params(labelsize=22)
 
-    plt.show()
+    #plt.show()
 
 
 
@@ -3199,7 +3262,7 @@ def plot_bestfit_summary(best, r_edges_pix, arcsec_per_pix, scale):
     prettify(ax, "Radius (kpc)")
 
     plt.tight_layout()
-    plt.show()
+    #plt.show()
 
 
 
@@ -3375,7 +3438,7 @@ def plot_residual_maps_cone(chi_squared_map, beta_array, v_array, num_shells, *,
         axes_flat[k].axis('off')
 
     plt.tight_layout()
-    plt.show()
+    #plt.show()
     
     
 def _make_conical_ring_masks(shape, center_xy, inc_deg, pa_deg,
@@ -3636,8 +3699,8 @@ def summarize_global_beta_with_per_shell_v(chi_squared_map, beta_array, v_array,
             else:
                 v_err[s] = _curvature_sigma_1d(v_array, prof)
 
-    print("\n=== Global-β best fits ===".format(sigma_scale))
-    print(f"β* = {beta_star:.1f} ± {beta_err:.2f} deg  ")
+    #print("\n=== Global-β best fits ===".format(sigma_scale))
+    #print(f"β* = {beta_star:.1f} ± {beta_err:.2f} deg  ")
     for s in range(S):
         print(f"Shell {s+1:2d}: v = {v_star[s]:7.1f} ± {(v_err[s]*sigma_scale):.1f} km/s")
 
@@ -3837,7 +3900,7 @@ def _plot_v_profile(best_dict, n_shells, title, scale_kpc_per_arcsec, rin_pix, r
     ax_top.set_xlabel("Radius [kpc]", fontsize = 14)
 
     plt.tight_layout()
-    plt.show()
+    #plt.show()
 
 
 def plot_beta_profile(best, n_shells, title, rin_pix, rout_pix, arcsec_per_pix, scale_kpc_per_arcsec):
@@ -3870,7 +3933,7 @@ def plot_beta_profile(best, n_shells, title, rin_pix, rout_pix, arcsec_per_pix, 
     ax_top.set_xlabel("Radius [kpc]")
 
     plt.tight_layout()
-    plt.show()
+    #plt.show()
     
     
 def plot_total_kappa_landscape(chi_squared_map, beta_array, mbh_array, *, best_kepl=None):
@@ -4127,8 +4190,8 @@ def plot_chi2_vs_beta_global(chi_squared_map, beta_array, v_array, *,
     #         ax.set_yscale("log")
 
     plt.tight_layout()
-    if show:
-        plt.show()
+    
+    #plt.show()
 
 
     return beta_best, beta, chi_beta_comb, chi_beta_per_shell
@@ -4227,7 +4290,7 @@ def plot_corner_kappa(chi_squared_map, beta_array, mbh_array, *, best_kepl=None)
 
     ax_top.grid(alpha=0.25); ax_right.grid(alpha=0.25); ax.grid(alpha=0.15)
     # fig.suptitle('Corner view', y=0.98, fontsize=12)
-    plt.show()
+    #plt.show()
 
 
 def plot_corner_kappa_nsc(chi_squared_map, beta_array, A_array, *, best_nsc=None):
@@ -4319,7 +4382,7 @@ def plot_corner_kappa_nsc(chi_squared_map, beta_array, A_array, *, best_nsc=None
 
     ax_top.grid(alpha=0.25); ax_right.grid(alpha=0.25); ax.grid(alpha=0.15)
     fig.subplots_adjust(right=0.9)
-    plt.show()
+    #plt.show()
 
 def percentile_scatter_per_shell_best(
     best, obs, vel_axis, center_xy, pa_deg,
@@ -4497,7 +4560,7 @@ def percentile_scatter_per_shell_best(
         spine.set_color("black")
 
     plt.tight_layout()
-    plt.show()
+    #plt.show()
 
     return dict(
         r_arcsec=radii_arcsec, r_kpc=radii_kpc,
@@ -4603,7 +4666,7 @@ def kepler_rc_vs_percentiles(
 
     ax.legend()
     plt.tight_layout()
-    plt.show()
+    #plt.show()
     
 def show_shells_overlay(
     cube_obs, center_xy, inc_deg, pa_deg,
@@ -4783,7 +4846,7 @@ def show_shells_overlay(
     ax.tick_params(axis="both", which="minor", labelsize=8, length=3, width=0.8)
 
     plt.tight_layout()
-    plt.show()
+    #plt.show()
     
 def plot_corner_kappa_plu(chi_squared_map, beta_array, M0_array, *, best_plu=None):
     # aggregate over shells
@@ -4874,7 +4937,7 @@ def plot_corner_kappa_plu(chi_squared_map, beta_array, M0_array, *, best_plu=Non
     ax_top.grid(alpha=0.25); ax_right.grid(alpha=0.25); ax.grid(alpha=0.15)
     fig.subplots_adjust(right=0.9)
 
-    plt.show()
+    #plt.show()
     
 def summarize_global_beta_param(chi_squared_map, beta_array, p_array, sigma_scale=1.0, pname='param', punits=''):
     """
@@ -5674,38 +5737,46 @@ def fit_gridsearch_component(
     chi_squared_map = np.zeros((num_shells, num_beta, num_v), dtype=float)
 
     tot_it = num_beta * num_v
-    it = 0
-    for ib, beta in enumerate(beta_array):
-        for iv, v in enumerate(v_array):
-            it += 1
-            pct = round(it / tot_it * 100, 0)
-            sys.stdout.write(f"\r{verbose_label} grid search: {pct}%")
-            sys.stdout.flush()
+    with Progress(
+        TextColumn("[bold cyan]{task.description}"),
+        BarColumn(),
+        TextColumn("{task.percentage:>6.1f}%"),
+        TimeElapsedColumn(),
+        TimeRemainingColumn(),
+        ) as progress:
+        task = progress.add_task(f"{verbose_label} grid search", total=tot_it)
+        for ib, beta in enumerate(beta_array):
+            for iv, v in enumerate(v_array):
 
-            disc_cube = _ctx_get("disc_cube", default=None)
+                # your existing computation here
+                # -------------------------------
 
-            # ---- primary lobe ----
-            model1 = build_model(beta, v, rt=RT_ARCSEC, R_nsc=R_nsc, a_plu=a_plu)
-            
-            # ---- second lobe for bicones ----
-            if bool(double_cone):
-                beta_flip  = 180.0 - beta
-                gamma_flip = (gamma_model_deg + 180.0) % 360.0
-            
-                # temporarily override gamma
-                _FIT_CTX["gamma_model"] = gamma_flip
-                model2 = build_model(beta_flip, v, rt=RT_ARCSEC, R_nsc=R_nsc, a_plu=a_plu)
-                _FIT_CTX["gamma_model"] = gamma_model_deg      # restore
-            
-                combined_model_cube = disc_cube + model1.cube["data"] + model2.cube["data"]
-            else:
-                combined_model_cube = disc_cube + model1.cube["data"] if disc_cube is not None else model1.cube["data"]
-            
-            # ---- evaluate χ² ----
-            kappa_shells, _ = eval_kappa_for_model(combined_model_cube, beta, float(gamma_model_deg))
+                progress.advance(task)
 
-            chi_squared_map[:, ib, iv] = kappa_shells
+                disc_cube = _ctx_get("disc_cube", default=None)
 
+                # ---- primary lobe ----
+                model1 = build_model(beta, v, rt=RT_ARCSEC, R_nsc=R_nsc, a_plu=a_plu)
+            
+                # ---- second lobe for bicones ----
+                if bool(double_cone):
+                    beta_flip  = 180.0 - beta
+                    gamma_flip = (gamma_model_deg + 180.0) % 360.0
+            
+                    # temporarily override gamma
+                    _FIT_CTX["gamma_model"] = gamma_flip
+                    model2 = build_model(beta_flip, v, rt=RT_ARCSEC, R_nsc=R_nsc, a_plu=a_plu)
+                    _FIT_CTX["gamma_model"] = gamma_model_deg      # restore
+            
+                    combined_model_cube = disc_cube + model1.cube["data"] + model2.cube["data"]
+                else:
+                    combined_model_cube = disc_cube + model1.cube["data"] if disc_cube is not None else model1.cube["data"]
+            
+                # ---- evaluate χ² ----
+                kappa_shells, _ = eval_kappa_for_model(combined_model_cube, beta, float(gamma_model_deg))
+
+                chi_squared_map[:, ib, iv] = kappa_shells
+ 
     print(f"\n{verbose_label} grid evaluation completed")
 
     # Default summary: global beta with per-shell v

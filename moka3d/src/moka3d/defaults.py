@@ -61,26 +61,24 @@ fit:
   outflow_mask_mode: bicone
   beta_grid_out: [50, 130, 5]
   v_grid_out: [100, 1300, 20]
+  disc_pa_deg: null
+
 
 advanced:
+  check_masking_before_fitting: false
   use_crps: false
-  crps_qgrid: [0.01, 0.063, 0.116, 0.169, 0.222, 0.275, 0.328, 0.381, 0.434, 0.487, 0.54, 0.593, 0.646, 0.699, 0.752, 0.805, 0.858, 0.911, 0.964]
   perc_disc: [0.05, 0.95]
   perc_out: [0.01, 0.99]
   perc_weights: [1, 1]
   npt: 200000
   use_global_beta_disc: true
   disc_fit_mode: independent
-  disc_geometry: cylindrical
   disc_theta_range:
     - [0, 1]
   disc_phi_range:
     - [0, 360]
   disc_zeta_range_mode: auto_from_psf
-  disc_double_cone: false
   use_global_beta_out: true
-  outflow_fit_mode: independent
-  out_geometry: spherical
   mask_disk_with_outflow: true
   mask_mode: zero
   do_final_combined_model_plot: true

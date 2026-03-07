@@ -83,10 +83,12 @@ class FitConfig:
     outflow_mask_mode: MaskMode = "bicone"
     beta_grid_out: List[float] = field(default_factory=lambda: [50, 130, 5])
     v_grid_out: List[float] = field(default_factory=lambda: [100, 1300, 20])
+    disc_pa_deg: float | None = None
 
 
 @dataclass
 class AdvancedConfig:
+    check_masking_before_fitting: bool = False
     use_crps: bool = False
     crps_qgrid: List[float] = field(default_factory=lambda: [0.01, 0.99])
     perc_disc: List[float] = field(default_factory=lambda: [0.05, 0.95])

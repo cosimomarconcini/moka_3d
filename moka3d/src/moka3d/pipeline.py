@@ -62,6 +62,86 @@ def _disc_zeta_range(cfg):
         return [-cfg.processing.psf_sigma / 2.0, cfg.processing.psf_sigma / 2.0]
     raise ValueError(f"Unsupported disc_zeta_range_mode: {cfg.advanced.disc_zeta_range_mode}")
 
+def _ask_user_to_continue_after_mask_check(output_path: Path) -> None:
+    print(f"\nMasking preview saved to:\n{output_path}")
+    print("Check the masking figure.")
+    answer = input("Continue with this masking? [y/N]: ").strip().lower()
+
+    if answer not in {"y", "yes"}:
+        raise RuntimeError(
+            "Run stopped by user after masking check. "
+            "Edit the YAML file and run again."
+        )
+
+def _plot_mask_preview(
+    obs,
+    mask_cone_pos,
+    mask_cone_neg,
+    mask_bicone,
+    output_dir: Path,
+    show_plots: bool,
+    xy_AGN,
+    xrange,
+    yrange,
+):
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5), dpi=200)
+
+    flux = np.array(obs.maps["flux"], copy=True)
+
+    panels = [
+        ("Outflow mask (+)", mask_cone_pos),
+        ("Outflow mask (-)", mask_cone_neg),
+        ("Outflow mask (bicone)", mask_bicone),
+    ]
+
+    for ax, (title, mask) in zip(axes, panels):
+        ax.imshow(np.log10(flux), origin="lower")
+        ax.contour(mask.astype(float), levels=[0.5], linewidths=2)
+        ax.set_title(title)
+        ax.set_xlabel("x [pix]")
+        ax.set_ylabel("y [pix]")
+
+    plt.tight_layout()
+    outpath = output_dir / "02a_mask_preview.png"
+    finalize_figure(outpath, show=show_plots)
+
+    return outpath
+
+def _extract_best_fit_with_uncertainties(fit: dict | None) -> dict | None:
+    """
+    Extract best-fit beta/v and approximate uncertainties from the fit dictionary.
+
+    Returns a dict with:
+        beta_best, beta_err, v_best, v_err
+    or None if fit is None.
+    """
+    if fit is None:
+        return None
+
+    beta_best = float(fit.get("beta_best", np.nan))
+    v_best = float(fit.get("v_best", np.nan))
+
+    beta_err = np.nan
+    v_err = np.nan
+
+    best = fit.get("best", None)
+    if isinstance(best, dict):
+        beta_err = float(best.get("beta_err_scalar", np.nan))
+
+        v_arr = np.asarray(best.get("v", []), dtype=float)
+        v_err_arr = np.asarray(best.get("v_err", []), dtype=float)
+
+        if v_arr.size > 0 and v_err_arr.size > 0:
+            idx = int(np.nanargmin(np.abs(v_arr - v_best)))
+            if idx < v_err_arr.size:
+                v_err = float(v_err_arr[idx])
+
+    return {
+        "beta_best": beta_best,
+        "beta_err": beta_err,
+        "v_best": v_best,
+        "v_err": v_err,
+    }
 
 def run_pipeline(cfg, config_path: Path | None = None) -> dict:
     warnings.filterwarnings("ignore", category=VerifyWarning)
@@ -103,19 +183,22 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         line_value=cfg.line.wavelength_line,
         line_unit=cfg.line.wavelength_line_unit,
         redshift=cfg.target.redshift,
-        convention="radio",
+        convention="optical",
     )
 
     obscube, _ = km.standardize_cube_to_spec_yx(obscube, n_spec=len(vel_kms_approx))
 
-    with np.errstate(all="ignore"):
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", "All-NaN slice encountered")
         floor_map = np.nanmin(obscube, axis=0)
 
-    obscube = obscube - floor_map[None, :, :]
-    obscube = np.clip(obscube, 0.0, None)
+    #floor_map[~np.isfinite(floor_map)] = 0.0
+
+    #obscube = obscube - floor_map[None, :, :]
+    #obscube = np.clip(obscube, 0.0, None)
 
     i0 = int(np.nanargmin(np.abs(vel_kms_approx)))
-    vel_kms = km.velocity_axis_rezero_to_systemic(vel_kms_approx, i0)
+    vel_kms = np.array(vel_kms_approx, copy=True)
 
     x_cen, y_cen, sx, sy, center_used = km.pick_center(
         wcs2d,
@@ -192,14 +275,16 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         R_data_arcsec=R_int_arcsec,
         R_data_err_arcsec=R_int_err,
     )
+    finalize_figure(output_dir / "03_PA_estimate.png", show=cfg.output.show_plots)
+
 
     summary = {
         "input_cube": cfg.input.cube_file,
         "hdu_index": hdu_index,
         "spec_unit": str(spec_unit),
         "pixel_scale_arcsec": float(pixscale),
-        "luminosity_distance": float(D_L),
-        "angular_diameter_distance": float(D_A),
+        "luminosity_distance_mpc": float(D_L.to_value("Mpc")),
+        "angular_diameter_distance_mpc": float(D_A.to_value("Mpc")),
         "scale_kpc_per_arcsec": float(scale),
         "estimated_pa_deg": float(pa_est),
         "estimated_pa_unc_deg": float(pa_est_unc),
@@ -269,12 +354,12 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
     psf_sigma = float(cfg.processing.psf_sigma)
     lsf_sigma = float(cfg.processing.lsf_sigma)
     vel_sigma = float(cfg.processing.vel_sigma)
-    logradius = bool(cfg.processing.logradius)
     xrange = cfg.processing.xrange
     yrange = cfg.processing.yrange
         
     dv_chan = float(np.nanmedian(np.abs(np.diff(vel))))
     SIGMA_PERC_KMS = float(np.sqrt(lsf_sigma**2 + (0.5 * dv_chan)**2))
+    logradius = False
     
     arcsec_per_pix = pixscale * nrebin
     rin_pix_disc = int(round(radius_range_model_disc[0] / arcsec_per_pix))
@@ -286,8 +371,18 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
     cube_nbins = obs.cube["nbins"]
     
     logger.info("Fit mode: %s", FIT_COMPONENT_MODE)
-    logger.info("Disc shells: %d | Outflow shells: %d", num_shells_disc, num_shells_out)
-    
+    if FIT_COMPONENT_MODE == "disk":
+        logger.info("Disc shells: %d", num_shells_disc)
+
+    elif FIT_COMPONENT_MODE == "outflow":
+        logger.info("Outflow shells: %d", num_shells_out)
+
+    elif FIT_COMPONENT_MODE == "disk_then_outflow":
+        logger.info(
+            "Disc shells: %d | Outflow shells: %d",
+            num_shells_disc,
+            num_shells_out,
+        )
     
     # fixed standard params that could be also decided by the user even if are std
     CRPS_QGRID = np.linspace(0.01, 0.99, 19)   
@@ -330,6 +425,20 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
 
     mask_bicone = (mask_cone_pos | mask_cone_neg)
 
+    if bool(cfg.advanced.check_masking_before_fitting):
+        mask_preview_path = _plot_mask_preview(
+            obs=obs,
+            mask_cone_pos=mask_cone_pos,
+            mask_cone_neg=mask_cone_neg,
+            mask_bicone=mask_bicone,
+            output_dir=output_dir,
+            show_plots=cfg.output.show_plots,
+            xy_AGN= origin,
+            xrange=xrange,
+            yrange=yrange,
+        )
+        _ask_user_to_continue_after_mask_check(mask_preview_path)
+
     def _keep_only_mask(cube, keep_mask_yx, mode="nan"):
         """Keep pixels inside keep_mask_yx; mask everything else."""
         mask_outside = ~keep_mask_yx
@@ -344,6 +453,8 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
     obs_disc_fit = None
     disc_best2_for_plots = None
     disc_cube_for_outflow = None
+    gamma_disc = None
+    gamma_disc_unc = None
 
     if FIT_COMPONENT_MODE in ("disk", "disk_then_outflow"):
 
@@ -361,17 +472,35 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         obs_disc_fit.plot_kin_maps(flrange=flrange, vrange=velrange, sigrange=sigrange,
                                    xy_AGN=xy_AGN, xrange=xrange, yrange=yrange)
         finalize_figure(output_dir / "02_disc_fit_input_maps.png", show=cfg.output.show_plots)
-        gamma_disc, gamma_disc_unc = km.estimate_pa_from_mom1(
-            obs_disc_fit.maps['vel'],
-            center_xy=origin,
-            pixscale=pixscale,
-            nrebin=nrebin,
-            xlimshow=xrange,
-            ylimshow=yrange,
-            psf_sigma_arcsec=psf_sigma,
-            R_data_arcsec=R_int_arcsec,
-            R_data_err_arcsec=R_int_err
-        )
+        if cfg.fit.disc_pa_deg is None:
+            gamma_disc, gamma_disc_unc = km.estimate_pa_from_mom1(
+                obs_disc_fit.maps["vel"],
+                center_xy=origin,
+                pixscale=pixscale,
+                nrebin=nrebin,
+                xlimshow=xrange,
+                ylimshow=yrange,
+                psf_sigma_arcsec=psf_sigma,
+                R_data_arcsec=R_int_arcsec,
+                R_data_err_arcsec=R_int_err,
+            )
+            logger.info(
+                "DISC PA estimated from moment-1 map: %.1f +/- %.1f deg",
+                gamma_disc,
+                gamma_disc_unc,
+            )
+        else:
+            gamma_disc = float(cfg.fit.disc_pa_deg)
+            gamma_disc_unc = (
+                float(cfg.fit.disc_pa_unc_deg)
+                if cfg.fit.disc_pa_unc_deg is not None
+                else 0.0
+            )
+            logger.info(
+                "DISC PA fixed from YAML: %.1f deg (uncertainty=%.1f deg)",
+                gamma_disc,
+                gamma_disc_unc,
+            )
         logger.info("DISC PA used: %.1f +/- %.1f deg", gamma_disc, gamma_disc_unc)
         # disc fit must NOT include any disc_cube
         km.set_fit_context(disc_cube=None)
@@ -408,7 +537,15 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
             verbose_label="DISC"
         )
 
-        logger.info("DISC best: beta=%.1f deg, v=%.1f km/s",disc_fit["beta_best"],disc_fit["v_best"])
+        disc_best_info = _extract_best_fit_with_uncertainties(disc_fit)
+        logger.info(
+            "DISC Global best: beta=%.1f ± %.1f deg, v=%.1f ± %.0f km/s",
+            disc_best_info["beta_best"],
+            disc_best_info["beta_err"],
+            disc_best_info["v_best"],
+            disc_best_info["v_err"],
+        )
+
 
         num_shells_disc_eff = int(np.shape(disc_fit["chi_squared_map"])[0])
 
@@ -649,8 +786,16 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
             beta_min=beta_min_o, beta_max=beta_max_o, step_beta=step_beta_o,
             v_min=v_min_o, v_max=v_max_o, step_v=step_v_o,
             verbose_label=label
-        )
-        logger.info("%s best: beta=%.1f deg, v=%.1f km/s",label,fit["beta_best"],fit["v_best"])
+            )
+        best_info = _extract_best_fit_with_uncertainties(fit)
+        logger.info(
+            "%s Global best: beta=%.1f ± %.1f deg, v=%.0f ± %.0f km/s",
+             label,
+             best_info["beta_best"],
+             best_info["beta_err"],
+             best_info["v_best"],
+             best_info["v_err"],
+             )
 
         n_shells_eff = int(np.shape(fit["chi_squared_map"])[0])
 
@@ -790,24 +935,70 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
 
         if FIT_COMPONENT_MODE == "outflow":
             km.set_fit_context(disc_cube=None)
-        # lobe +
-        logger.info("OUTFLOW lobe +: PA=%.1f deg, opening=%.1f deg", OUTFLOW_PA_DEG,OUTFLOW_OPENING_DEG)
 
-        outflow_fit_pos, model_outflow_pos_best, out_best2_pos = _run_single_lobe_outflow_fit(
-            obs_lobe=obs_out_pos,
-            pa_deg=OUTFLOW_PA_DEG,
-            label="OUTFLOW (+)"
-        )
-
-        # lobe -
+        fit_bicone = (str(OUTFLOW_MASK_MODE).lower() == "bicone") or bool(OUTFLOW_DOUBLE_CONE)
         gamma_neg = (OUTFLOW_PA_DEG + 180.0) % 360.0
-        logger.info("OUTFLOW lobe -: PA=%.1f deg, opening=%.1f deg", gamma_neg,OUTFLOW_OPENING_DEG)
 
-        outflow_fit_neg, model_outflow_neg_best, out_best2_neg = _run_single_lobe_outflow_fit(
-            obs_lobe=obs_out_neg,
-            pa_deg=gamma_neg,
-            label="OUTFLOW (-)"
-        )
+        if fit_bicone:
+            logger.info(
+                "OUTFLOW bicone mode: fitting both lobes (PA=%.1f deg and %.1f deg, opening=%.1f deg)",
+                OUTFLOW_PA_DEG,
+                gamma_neg,
+                OUTFLOW_OPENING_DEG,
+            )
+
+            logger.info(
+                "OUTFLOW lobe +: PA=%.1f deg, opening=%.1f deg",
+                OUTFLOW_PA_DEG,
+                OUTFLOW_OPENING_DEG,
+            )
+            outflow_fit_pos, model_outflow_pos_best, out_best2_pos = _run_single_lobe_outflow_fit(
+                obs_lobe=obs_out_pos,
+                pa_deg=OUTFLOW_PA_DEG,
+                label="OUTFLOW (+)"
+            )
+
+            logger.info(
+                "OUTFLOW lobe -: PA=%.1f deg, opening=%.1f deg",
+                gamma_neg,
+                OUTFLOW_OPENING_DEG,
+            )
+            outflow_fit_neg, model_outflow_neg_best, out_best2_neg = _run_single_lobe_outflow_fit(
+                obs_lobe=obs_out_neg,
+                pa_deg=gamma_neg,
+                label="OUTFLOW (-)"
+            )
+
+        else:
+            if OUTFLOW_AXIS_SIGN >= 0:
+                logger.info(
+                    "OUTFLOW single-cone mode: fitting only lobe + (PA=%.1f deg, opening=%.1f deg)",
+                    OUTFLOW_PA_DEG,
+                    OUTFLOW_OPENING_DEG,
+                )
+                outflow_fit_pos, model_outflow_pos_best, out_best2_pos = _run_single_lobe_outflow_fit(
+                    obs_lobe=obs_out_pos,
+                    pa_deg=OUTFLOW_PA_DEG,
+                    label="OUTFLOW (+)"
+                )
+                outflow_fit_neg = None
+                model_outflow_neg_best = None
+                out_best2_neg = None
+
+            else:
+                logger.info(
+                    "OUTFLOW single-cone mode: fitting only lobe - (PA=%.1f deg, opening=%.1f deg)",
+                    gamma_neg,
+                    OUTFLOW_OPENING_DEG,
+                )
+                outflow_fit_neg, model_outflow_neg_best, out_best2_neg = _run_single_lobe_outflow_fit(
+                    obs_lobe=obs_out_neg,
+                    pa_deg=gamma_neg,
+                    label="OUTFLOW (-)"
+                )
+                outflow_fit_pos = None
+                model_outflow_pos_best = None
+                out_best2_pos = None
 
     # ============================================================
     # OUTFLOW-ONLY: build total outflow model 
@@ -844,7 +1035,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
 
             if num_shells_out <= 1:
                 mm = km._make_single_km_component(
-                    npt=int(npt)*10,
+                    npt=int(npt)*30,
                     geometry="spherical",
                     radius_range=radius_range_model_out,
                     theta_range=theta_out,
@@ -884,7 +1075,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                         v_arr    = list(np.asarray(b2["v"], float))
 
                 mm = km._make_multishell_component(
-                    npt_total=int(npt)*10,
+                    npt_total=int(npt)*30,
                     n_shells=num_shells_out,
                     geometry="spherical",
                     radius_range_shells=radius_shells_out,
@@ -1062,7 +1253,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
             v_arr_disc    = list(np.asarray(disc_best2_for_plots["v"], float))
 
         m_final = km._make_multishell_component(
-            npt_total=int(npt)*10,
+            npt_total=int(npt)*30,
             n_shells=num_shells_disc_eff,
             geometry="cylindrical",
             radius_range_shells=radius_shells_disc,
@@ -1119,7 +1310,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                 )
             else:
                 mm = km._make_multishell_component(
-                    npt_total=int(npt)*10,
+                    npt_total=int(npt)*30,
                     n_shells=num_shells_out,
                     geometry="spherical",
                     radius_range_shells=radius_shells_out,
@@ -1304,24 +1495,159 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         finalize_figure(output_dir / "99_vel_profiles.png", show=cfg.output.show_plots)
 
 
+
+    # ============================================================
+    # FINAL SUMMARY
+    # ============================================================
+    fit_bicone = (str(OUTFLOW_MASK_MODE).lower() == "bicone") or bool(OUTFLOW_DOUBLE_CONE)
+    disc_present = FIT_COMPONENT_MODE in ("disk", "disk_then_outflow")
+    outflow_present = FIT_COMPONENT_MODE in ("outflow", "disk_then_outflow")
+    is_single_outflow = outflow_present and (not fit_bicone)
+    is_bicone_outflow = outflow_present and fit_bicone
+
     summary["fit_component_mode"] = FIT_COMPONENT_MODE
+    summary["check_masking_before_fitting"] = bool(cfg.advanced.check_masking_before_fitting)
 
-    if disc_fit is not None:
-        summary["disc_best_beta_deg"] = float(disc_fit["beta_best"])
-        summary["disc_best_v_kms"] = float(disc_fit["v_best"])
+    summary["num_shells_disc"] = int(num_shells_disc)
+    summary["num_shells_out"] = int(num_shells_out)
 
-    if outflow_fit_pos is not None:
-        summary["outflow_pos_best_beta_deg"] = float(outflow_fit_pos["beta_best"])
-        summary["outflow_pos_best_v_kms"] = float(outflow_fit_pos["v_best"])
+    # Record the selected outflow topology whenever outflow is part of the run
+    if outflow_present:
+        summary["outflow_topology"] = "bicone" if fit_bicone else "single"
+        summary["outflow_axis_sign"] = int(OUTFLOW_AXIS_SIGN)
+        summary["outflow_pa_deg"] = float(OUTFLOW_PA_DEG)
+        summary["outflow_opening_deg"] = float(OUTFLOW_OPENING_DEG)
+    else:
+        summary["outflow_topology"] = None
+        summary["outflow_axis_sign"] = None
+        summary["outflow_pa_deg"] = None
+        summary["outflow_opening_deg"] = None
 
-    if outflow_fit_neg is not None:
-        summary["outflow_neg_best_beta_deg"] = float(outflow_fit_neg["beta_best"])
-        summary["outflow_neg_best_v_kms"] = float(outflow_fit_neg["v_best"])
+    # ----------------------------
+    # Disc PA
+    # ----------------------------
+    if gamma_disc is not None:
+        summary["disc_pa_deg"] = float(gamma_disc)
+        summary["disc_pa_unc_deg"] = (
+            float(gamma_disc_unc) if gamma_disc_unc is not None else None
+        )
+        summary["disc_pa_mode"] = "fixed" if cfg.fit.disc_pa_deg is not None else "estimated"
+    else:
+        summary["disc_pa_deg"] = None
+        summary["disc_pa_unc_deg"] = None
+        summary["disc_pa_mode"] = None
 
+    # ----------------------------
+    # Disc fit
+    # ----------------------------
+    if disc_present and (disc_fit is not None):
+        disc_best_info = _extract_best_fit_with_uncertainties(disc_fit)
+        summary["disc_best_beta_deg"] = disc_best_info["beta_best"]
+        summary["disc_best_beta_err_deg"] = disc_best_info["beta_err"]
+        summary["disc_best_v_kms"] = disc_best_info["v_best"]
+        summary["disc_best_v_err_kms"] = disc_best_info["v_err"]
+    else:
+        summary["disc_best_beta_deg"] = None
+        summary["disc_best_beta_err_deg"] = None
+        summary["disc_best_v_kms"] = None
+        summary["disc_best_v_err_kms"] = None
+
+    # ----------------------------
+    # Single-cone outflow
+    # ----------------------------
+    if is_single_outflow:
+        summary["outflow_lobe"] = None
+        summary["outflow_best_beta_deg"] = None
+        summary["outflow_best_beta_err_deg"] = None
+        summary["outflow_best_v_kms"] = None
+        summary["outflow_best_v_err_kms"] = None
+
+        if outflow_fit_pos is not None:
+            out_best_info = _extract_best_fit_with_uncertainties(outflow_fit_pos)
+            summary["outflow_best_beta_deg"] = out_best_info["beta_best"]
+            summary["outflow_best_beta_err_deg"] = out_best_info["beta_err"]
+            summary["outflow_best_v_kms"] = out_best_info["v_best"]
+            summary["outflow_best_v_err_kms"] = out_best_info["v_err"]
+            summary["outflow_lobe"] = "positive"
+
+        elif outflow_fit_neg is not None:
+            out_best_info = _extract_best_fit_with_uncertainties(outflow_fit_neg)
+            summary["outflow_best_beta_deg"] = out_best_info["beta_best"]
+            summary["outflow_best_beta_err_deg"] = out_best_info["beta_err"]
+            summary["outflow_best_v_kms"] = out_best_info["v_best"]
+            summary["outflow_best_v_err_kms"] = out_best_info["v_err"]
+            summary["outflow_lobe"] = "negative"
+
+        # In single-cone mode, keep lobe-specific bicone fields explicitly null
+        summary["outflow_pos_best_beta_deg"] = None
+        summary["outflow_pos_best_beta_err_deg"] = None
+        summary["outflow_pos_best_v_kms"] = None
+        summary["outflow_pos_best_v_err_kms"] = None
+
+        summary["outflow_neg_best_beta_deg"] = None
+        summary["outflow_neg_best_beta_err_deg"] = None
+        summary["outflow_neg_best_v_kms"] = None
+        summary["outflow_neg_best_v_err_kms"] = None
+
+    # ----------------------------
+    # Bicone outflow
+    # ----------------------------
+    elif is_bicone_outflow:
+        # No compact single-outflow fields in bicone mode
+        summary["outflow_lobe"] = None
+        summary["outflow_best_beta_deg"] = None
+        summary["outflow_best_beta_err_deg"] = None
+        summary["outflow_best_v_kms"] = None
+        summary["outflow_best_v_err_kms"] = None
+
+        if outflow_fit_pos is not None:
+            out_pos_info = _extract_best_fit_with_uncertainties(outflow_fit_pos)
+            summary["outflow_pos_best_beta_deg"] = out_pos_info["beta_best"]
+            summary["outflow_pos_best_beta_err_deg"] = out_pos_info["beta_err"]
+            summary["outflow_pos_best_v_kms"] = out_pos_info["v_best"]
+            summary["outflow_pos_best_v_err_kms"] = out_pos_info["v_err"]
+        else:
+            summary["outflow_pos_best_beta_deg"] = None
+            summary["outflow_pos_best_beta_err_deg"] = None
+            summary["outflow_pos_best_v_kms"] = None
+            summary["outflow_pos_best_v_err_kms"] = None
+
+        if outflow_fit_neg is not None:
+            out_neg_info = _extract_best_fit_with_uncertainties(outflow_fit_neg)
+            summary["outflow_neg_best_beta_deg"] = out_neg_info["beta_best"]
+            summary["outflow_neg_best_beta_err_deg"] = out_neg_info["beta_err"]
+            summary["outflow_neg_best_v_kms"] = out_neg_info["v_best"]
+            summary["outflow_neg_best_v_err_kms"] = out_neg_info["v_err"]
+        else:
+            summary["outflow_neg_best_beta_deg"] = None
+            summary["outflow_neg_best_beta_err_deg"] = None
+            summary["outflow_neg_best_v_kms"] = None
+            summary["outflow_neg_best_v_err_kms"] = None
+
+    # ----------------------------
+    # No outflow 
+    # ----------------------------
+    else:
+        summary["outflow_lobe"] = None
+        summary["outflow_best_beta_deg"] = None
+        summary["outflow_best_beta_err_deg"] = None
+        summary["outflow_best_v_kms"] = None
+        summary["outflow_best_v_err_kms"] = None
+
+        summary["outflow_pos_best_beta_deg"] = None
+        summary["outflow_pos_best_beta_err_deg"] = None
+        summary["outflow_pos_best_v_kms"] = None
+        summary["outflow_pos_best_v_err_kms"] = None
+
+        summary["outflow_neg_best_beta_deg"] = None
+        summary["outflow_neg_best_beta_err_deg"] = None
+        summary["outflow_neg_best_v_kms"] = None
+        summary["outflow_neg_best_v_err_kms"] = None
+
+    # Save summary only once, at the very end
     if cfg.output.save_summary_json:
         _save_summary(summary, output_dir)
-        
-        
+
     return summary
 
 
