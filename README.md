@@ -26,15 +26,14 @@ Typical applications include:
 ---
         
 # Installation
-I suggest to create a new environment from the .yml env file in this repo and then install MOKA 3D as explained in the following.
+I suggest to create a new environment from the environment_moka.yml file in this repo and then install MOKA 3D as explained in the following.
 1) conda env create -f environment_moka.yml
 2) conda activate moka3d_env
-3) 
-conda create --name moka3d_env
-Then activate it:
-conda activate moka3d_env
+
+
 
 Then, clone the MOKA 3D repository. For now this repo is private to to clone it you will need a personal token, you can do it like this:
+
 Click your profile picture at the top right --> Settings --> Scroll down the left panel --> Developer settings --> Personal access tokens --> Tokens (classic) --> Generate new token (classic) --> select only 'repo' --> give it a random name --> scroll down and create token --> save token 
 
 Then, from terminal run:
@@ -50,11 +49,9 @@ Password: the token
 
 Move to the pulled folder:
 
-cd moka3d
+cd moka_3d/moka3d
 
-Install the required packages:
-
-conda install pip
+Install the moka3d package:
 
 python -m pip install -e .
 
