@@ -26,8 +26,10 @@ Typical applications include:
 ---
         
 # Installation
-I suggest to create a new environment and then install MOKA 3D as explained in the following.
-E.g.:
+I suggest to create a new environment from the .yml env file in this repo and then install MOKA 3D as explained in the following.
+1) conda env create -f environment_moka.yml
+2) conda activate moka3d_env
+3) 
 conda create --name moka3d_env
 Then activate it:
 conda activate moka3d_env
