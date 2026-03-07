@@ -59,6 +59,11 @@ Then test moka3d. This will run the config_basic.yaml file with all the necessar
 
 moka3d run config_basic.yaml 
 
+# Citing MOKA 3D in your work
+
+If you use this code in your publication please cite the following two papers: https://ui.adsabs.harvard.edu/abs/2023A%26A...677A..58M/abstract https://ui.adsabs.harvard.edu/abs/2025NatAs...9..907M/abstract
+
+
 
 
 
