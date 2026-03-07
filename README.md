@@ -6,7 +6,7 @@ The code reconstructs gas kinematics directly in the **data cube space**, compar
 
 Typical applications include:
 
-- AGN-driven outflows
+- AGN/SF-driven outflows
 - rotating gas discs
 - combined disc + outflow systems
 
