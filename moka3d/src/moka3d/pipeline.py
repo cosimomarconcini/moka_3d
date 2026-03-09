@@ -27,6 +27,7 @@ from matplotlib.ticker import AutoMinorLocator
 from . import moka3d_source as km
 from .plotting import finalize_figure
 
+from astropy.io import fits
 
 
 logger = logging.getLogger(__name__)
@@ -107,6 +108,8 @@ def _plot_mask_preview(
 
     return outpath
 
+
+
 def _extract_best_fit_with_uncertainties(fit: dict | None) -> dict | None:
     """
     Extract best-fit beta/v and approximate uncertainties from the fit dictionary.
@@ -142,6 +145,121 @@ def _extract_best_fit_with_uncertainties(fit: dict | None) -> dict | None:
         "v_best": v_best,
         "v_err": v_err,
     }
+
+
+
+
+
+def _make_map_header_from_obs(obs, bunit=""):
+    hdr = fits.Header()
+
+    crpix = obs.cube.get("crpix", None)
+    crval = obs.cube.get("crval", None)
+    cdelt = obs.cube.get("cdelt", None)
+
+    hdr["NAXIS"] = 2
+    hdr["CTYPE1"] = "XOFFSET"
+    hdr["CTYPE2"] = "YOFFSET"
+
+    if crpix is not None and crval is not None and cdelt is not None:
+        hdr["CRPIX1"] = float(crpix[2])
+        hdr["CRPIX2"] = float(crpix[1])
+
+        hdr["CRVAL1"] = float(crval[2])
+        hdr["CRVAL2"] = float(crval[1])
+
+        hdr["CDELT1"] = float(cdelt[2])
+        hdr["CDELT2"] = float(cdelt[1])
+
+    hdr["CUNIT1"] = "arcsec"
+    hdr["CUNIT2"] = "arcsec"
+
+    if bunit:
+        hdr["BUNIT"] = bunit
+
+    return hdr
+
+
+
+
+def _make_cube_header_from_obs(obs):
+    hdr = fits.Header()
+
+    crpix = obs.cube.get("crpix", None)
+    crval = obs.cube.get("crval", None)
+    cdelt = obs.cube.get("cdelt", None)
+
+    hdr["NAXIS"] = 3
+
+    # FITS axis order is opposite to NumPy array order.
+    # If data shape is (spec, y, x), then:
+    #   FITS axis 1 -> x
+    #   FITS axis 2 -> y
+    #   FITS axis 3 -> spectral
+
+    hdr["CTYPE1"] = "XOFFSET"
+    hdr["CTYPE2"] = "YOFFSET"
+    hdr["CTYPE3"] = "VELO-LSR"
+
+    if crpix is not None and crval is not None and cdelt is not None:
+        hdr["CRPIX1"] = float(crpix[2])
+        hdr["CRPIX2"] = float(crpix[1])
+        hdr["CRPIX3"] = float(crpix[0])
+
+        hdr["CRVAL1"] = float(crval[2])
+        hdr["CRVAL2"] = float(crval[1])
+        hdr["CRVAL3"] = float(crval[0])
+
+        hdr["CDELT1"] = float(cdelt[2])
+        hdr["CDELT2"] = float(cdelt[1])
+        hdr["CDELT3"] = float(cdelt[0])
+
+    hdr["CUNIT1"] = "arcsec"
+    hdr["CUNIT2"] = "arcsec"
+    hdr["CUNIT3"] = "km/s"
+
+    return hdr
+
+
+
+
+def _save_model_cube_fits(model, obs, output_path: Path):
+    hdr = _make_cube_header_from_obs(obs)
+    data = np.asarray(model.cube["data"], dtype=np.float32)
+
+    hdu = fits.PrimaryHDU(data=data, header=hdr)
+    hdu.writeto(output_path, overwrite=True)
+
+def _save_moment_maps_fits(obs, model, output_path: Path):
+    flux_data = np.asarray(obs.maps["flux"], dtype=np.float32)
+    vel_data = np.asarray(obs.maps["vel"], dtype=np.float32)
+    sig_data = np.asarray(obs.maps["sig"], dtype=np.float32)
+
+    flux_model = np.asarray(model.maps["flux"], dtype=np.float32)
+    vel_model = np.asarray(model.maps["vel"], dtype=np.float32)
+    sig_model = np.asarray(model.maps["sig"], dtype=np.float32)
+
+    flux_resid = flux_data - flux_model
+    vel_resid = vel_data - vel_model
+    sig_resid = sig_data - sig_model
+
+    hdul = fits.HDUList([
+        fits.PrimaryHDU(),
+        fits.ImageHDU(flux_data,  header=_make_map_header_from_obs(obs, bunit="flux"), name="FLUX_DATA"),
+        fits.ImageHDU(vel_data,   header=_make_map_header_from_obs(obs, bunit="km/s"), name="VEL_DATA"),
+        fits.ImageHDU(sig_data,   header=_make_map_header_from_obs(obs, bunit="km/s"), name="SIG_DATA"),
+
+        fits.ImageHDU(flux_model, header=_make_map_header_from_obs(obs, bunit="flux"), name="FLUX_MODEL"),
+        fits.ImageHDU(vel_model,  header=_make_map_header_from_obs(obs, bunit="km/s"), name="VEL_MODEL"),
+        fits.ImageHDU(sig_model,  header=_make_map_header_from_obs(obs, bunit="km/s"), name="SIG_MODEL"),
+
+        fits.ImageHDU(flux_resid, header=_make_map_header_from_obs(obs, bunit="flux"), name="FLUX_RESID"),
+        fits.ImageHDU(vel_resid,  header=_make_map_header_from_obs(obs, bunit="km/s"), name="VEL_RESID"),
+        fits.ImageHDU(sig_resid,  header=_make_map_header_from_obs(obs, bunit="km/s"), name="SIG_RESID"),
+    ])
+
+    hdul.writeto(output_path, overwrite=True)
+
 
 def run_pipeline(cfg, config_path: Path | None = None) -> dict:
     warnings.filterwarnings("ignore", category=VerifyWarning)
@@ -299,7 +417,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         _save_summary(summary, output_dir)
 
     logger.info("Initial setup complete")
-    logger.info("Estimated PA = %.2f +/- %.2f deg", pa_est, pa_est_unc)
+    logger.info("Estimated PA with no mask = %.2f +/- %.2f deg", pa_est, pa_est_unc)
     
     
 
@@ -308,6 +426,12 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
     # ============================================================
     
     FIT_COMPONENT_MODE = cfg.fit.component_mode
+
+    SAVE_ALL_OUTPUTS = bool(cfg.input.save_all_outputs)
+    final_model = None
+    final_model_name = None
+
+
     
     USE_CRPS = cfg.advanced.use_crps
     loss = "crps" if USE_CRPS else "extreme"
@@ -501,7 +625,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                 gamma_disc,
                 gamma_disc_unc,
             )
-        logger.info("DISC PA used: %.1f +/- %.1f deg", gamma_disc, gamma_disc_unc)
+        logger.info("DISC PA adopted: %.1f +/- %.1f deg", gamma_disc, gamma_disc_unc)
         # disc fit must NOT include any disc_cube
         km.set_fit_context(disc_cube=None)
 
@@ -685,7 +809,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         # ============================================================
         # DISC-ONLY: moment maps comparison 
         # ============================================================
-        if (FIT_COMPONENT_MODE == "disk") and DO_FINAL_COMBINED_MODEL_PLOT and (model_disc_best is not None):
+        if (FIT_COMPONENT_MODE == "disk") and (DO_FINAL_COMBINED_MODEL_PLOT or SAVE_ALL_OUTPUTS) and (model_disc_best is not None):
             m_disc_final = model_disc_best
             # Ensure we have model kinematic maps computed
             try:
@@ -697,6 +821,10 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                 m_disc_final.kin_maps_cube(fluxthr=np.nanpercentile(obscube, 1))
             except Exception as e:
                 logger.warning("DISC-only maps build: %r", e)
+
+
+            final_model = m_disc_final
+            final_model_name = "bestfit_disk_weighted_cube.fits"
 
 
             # 3x3 comparison
@@ -1003,7 +1131,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
     # ============================================================
     # OUTFLOW-ONLY: build total outflow model 
     # ============================================================
-    if (FIT_COMPONENT_MODE == "outflow") and DO_FINAL_COMBINED_MODEL_PLOT:
+    if (FIT_COMPONENT_MODE == "outflow") and (DO_FINAL_COMBINED_MODEL_PLOT or SAVE_ALL_OUTPUTS):
 
         
         build_bicone_total = (str(OUTFLOW_MASK_MODE).lower() == "bicone") or bool(OUTFLOW_DOUBLE_CONE)
@@ -1139,6 +1267,11 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                 logger.warning("OUTFLOW-only maps build %r", e)
 
 
+            final_model = m_out_total
+            if build_bicone_total:
+                final_model_name = "bestfit_outflow_bicone_weighted_cube.fits"
+            else:
+                final_model_name = "bestfit_outflow_singlecone_weighted_cube.fits"
 
             km.plot_kin_maps_3x3(
                 obs=obs,
@@ -1214,7 +1347,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
     # ============================================================
     # 6) FINAL COMBINED MODEL (DISC + OUTFLOW+ + OUTFLOW-) + 3x3 moment comparison
     # ============================================================
-    if DO_FINAL_COMBINED_MODEL_PLOT and (model_disc_best is not None) and (model_outflow_pos_best is not None) and (model_outflow_neg_best is not None):
+    if (DO_FINAL_COMBINED_MODEL_PLOT or SAVE_ALL_OUTPUTS) and (model_disc_best is not None) and (model_outflow_pos_best is not None or model_outflow_neg_best is not None):
 
         logger.info("\n--- Building final combined (DISC + OUTFLOW+ + OUTFLOW-) model ---")
 
@@ -1351,6 +1484,10 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         m_final.weight_cube(obs.cube["data"])
         m_final.generate_cube(weights=m_final.cube["weights"])
         m_final.kin_maps_cube(fluxthr=np.nanpercentile(obscube, 1))
+
+
+        final_model = m_final
+        final_model_name = "bestfit_disk_outflow_weighted_cube.fits"
 
         km.plot_kin_maps_3x3(
             obs=obs,
@@ -1495,6 +1632,27 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         finalize_figure(output_dir / "99_vel_profiles.png", show=cfg.output.show_plots)
 
 
+
+    # ============================================================
+    # SAVE ALL OUTPUTS
+    # ============================================================
+    if SAVE_ALL_OUTPUTS:
+        if final_model is not None:
+            try:
+                cube_out = output_dir / final_model_name
+                _save_model_cube_fits(final_model, obs, cube_out)
+                logger.info("Saved best-fit weighted model cube to %s", cube_out)
+            except Exception as e:
+                logger.warning("Failed to save best-fit model cube: %r", e)
+
+            try:
+                maps_out = output_dir / "bestfit_moment_maps.fits"
+                _save_moment_maps_fits(obs, final_model, maps_out)
+                logger.info("Saved data/model/residual moment maps to %s", maps_out)
+            except Exception as e:
+                logger.warning("Failed to save moment maps FITS: %r", e)
+        else:
+            logger.warning("save_all_outputs=True but no final model was available to save.")
 
     # ============================================================
     # FINAL SUMMARY
@@ -1649,6 +1807,8 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         _save_summary(summary, output_dir)
 
     return summary
+
+
 
 
 
