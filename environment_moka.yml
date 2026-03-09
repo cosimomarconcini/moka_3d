@@ -1,0 +1,24 @@
+name: moka3d_env
+channels:
+  - defaults
+dependencies:
+  - libmpdec==4.0.0
+  - python==3.13.5
+  - ca-certificates==2025.7.15
+  - libcxx==19.1.7
+  - readline==8.3
+  - expat==2.7.1
+  - setuptools==78.1.1
+  - tk==8.6.15
+  - openssl==3.0.17
+  - libffi==3.4.4
+  - tzdata==2026a
+  - pip==26.0.1
+  - xz==5.6.4
+  - bzip2==1.0.8
+  - sqlite==3.50.2
+  - wheel==0.45.1
+  - zlib==1.2.13
+  - ncurses==6.5
+  - python_abi==3.13=0_cp313
+prefix: /Users/cosimo/opt/anaconda3/envs/moka3d_env
