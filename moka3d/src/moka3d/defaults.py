@@ -84,6 +84,8 @@ advanced:
   do_final_combined_model_plot: true
   outflow_axis_sign: 1
   resid_ranges: [0.15, 55, 55]
+  compute_escape_fraction: false
+  save_escape_fraction_table: true
 
 output:
   save_plots: true

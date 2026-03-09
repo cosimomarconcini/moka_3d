@@ -29,7 +29,6 @@ from .plotting import finalize_figure
 
 from astropy.io import fits
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -220,6 +219,176 @@ def _make_cube_header_from_obs(obs):
 
     return hdr
 
+def _shell_midpoints_and_halfwidths_arcsec(rin_pix, rout_pix, n_shells, arcsec_per_pix):
+    edges_pix = np.linspace(float(rin_pix), float(rout_pix), int(n_shells) + 1)
+    edges_arc = edges_pix * arcsec_per_pix
+    rmid_arc = 0.5 * (edges_arc[:-1] + edges_arc[1:])
+    xerr_arc = 0.5 * (edges_arc[1:] - edges_arc[:-1])
+    return rmid_arc, xerr_arc
+
+def _interp_with_nan(x_new, x_old, y_old):
+    x_old = np.asarray(x_old, dtype=float)
+    y_old = np.asarray(y_old, dtype=float)
+    x_new = np.asarray(x_new, dtype=float)
+
+    good = np.isfinite(x_old) & np.isfinite(y_old)
+    if np.sum(good) < 2:
+        return np.full_like(x_new, np.nan, dtype=float)
+
+    return np.interp(x_new, x_old[good], y_old[good], left=np.nan, right=np.nan)
+
+
+def _ratio_and_uncertainty(v_out, e_out, v_disc, e_disc):
+    v_out = np.asarray(v_out, dtype=float)
+    e_out = np.asarray(e_out, dtype=float)
+    v_disc = np.asarray(v_disc, dtype=float)
+    e_disc = np.asarray(e_disc, dtype=float)
+
+    denom = 3.0 * v_disc
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ratio = v_out / denom
+
+        frac_out = np.divide(
+            e_out, v_out,
+            out=np.full_like(e_out, np.nan, dtype=float),
+            where=np.isfinite(v_out) & (v_out != 0)
+        )
+        frac_disc = np.divide(
+            e_disc, v_disc,
+            out=np.full_like(e_disc, np.nan, dtype=float),
+            where=np.isfinite(v_disc) & (v_disc != 0)
+        )
+
+        ratio_err = np.abs(ratio) * np.sqrt(frac_out**2 + frac_disc**2)
+
+    bad = (~np.isfinite(ratio)) | (~np.isfinite(ratio_err))
+    ratio[bad] = np.nan
+    ratio_err[bad] = np.nan
+
+    return ratio, ratio_err
+
+
+def _extract_radial_profile(best_profile, rin_pix, rout_pix, n_shells, arcsec_per_pix):
+    if best_profile is None:
+        return None
+
+    v = np.asarray(best_profile.get("v", []), dtype=float)
+    if v.size == 0:
+        return None
+
+    v_err = np.asarray(best_profile.get("v_err", np.full_like(v, np.nan)), dtype=float)
+
+    rmid_arc, xerr_arc = _shell_midpoints_and_halfwidths_arcsec(
+        rin_pix=rin_pix,
+        rout_pix=rout_pix,
+        n_shells=n_shells,
+        arcsec_per_pix=arcsec_per_pix,
+    )
+
+    n = min(len(rmid_arc), len(v), len(v_err), len(xerr_arc))
+
+    return {
+        "r_arcsec": rmid_arc[:n],
+        "xerr_arcsec": xerr_arc[:n],
+        "v": v[:n],
+        "v_err": v_err[:n],
+    }
+
+
+def _plot_escape_fraction_profile(
+    *,
+    output_path: Path,
+    scale_kpc_per_arcsec: float,
+    radius_range_model_disc,
+    radius_range_model_out,
+    disc_profile,
+    out_pos_profile=None,
+    out_neg_profile=None,
+    out_avg_profile=None,
+    show_plots=False,
+):
+    fig, ax = plt.subplots(figsize=(6.5, 4.8), dpi=300)
+
+    ax.xaxis.set_minor_locator(AutoMinorLocator(2))
+    ax.yaxis.set_minor_locator(AutoMinorLocator(2))
+    ax.tick_params(which="minor", length=3)
+    ax.tick_params(axis="both", labelsize=12)
+
+    def _draw_one(profile, label):
+        if profile is None:
+            return
+        r = profile["r_arcsec"]
+        xerr = profile["xerr_arcsec"]
+        y = profile["ratio"]
+        yerr = profile["ratio_err"]
+
+        good = np.isfinite(r) & np.isfinite(y)
+        if not np.any(good):
+            return
+
+        ax.errorbar(
+            r[good], y[good],
+            xerr=xerr[good],
+            fmt="o-",
+            lw=1.5,
+            capsize=4,
+            label=label,
+        )
+        ylo = y - yerr
+        yhi = y + yerr
+        ok_band = good & np.isfinite(ylo) & np.isfinite(yhi)
+        if np.any(ok_band):
+            ax.fill_between(r[ok_band], ylo[ok_band], yhi[ok_band], alpha=0.2)
+
+    _draw_one(out_pos_profile, "Outflow (+)")
+    _draw_one(out_neg_profile, "Outflow (-)")
+    _draw_one(out_avg_profile, "Outflow avg")
+
+    ax.axhline(1.0, ls="--", lw=1.2)
+    ax.set_xlabel(r"Radius [arcsec]", fontsize=14)
+    ax.set_ylabel(r"$v_{\rm out}/(v_{\rm esc})$", fontsize=14)
+    ax.grid(alpha=0.2)
+    ax.legend(fontsize=12, loc="best")
+
+    rmax_arc = float(max(radius_range_model_disc[1], radius_range_model_out[1]))
+    xmin, xmax = 0.0, rmax_arc
+    pad = 0.02 * (xmax - xmin) if xmax > xmin else 0.1
+    ax.set_xlim(max(0.0, xmin), xmax + pad)
+
+    ax_top = ax.twiny()
+    ax_top.tick_params(axis="both", labelsize=12)
+    ax_top.set_xlim(ax.get_xlim())
+    tick_arc = ax.get_xticks()
+    tick_arc = tick_arc[tick_arc >= 0]
+    ax.set_xticks(tick_arc)
+    ax_top.set_xticks(tick_arc)
+    tick_show = tick_arc * scale_kpc_per_arcsec
+    ax_top.set_xticklabels([f"{round(t,1):.1f}" for t in tick_show])
+    ax_top.set_xlabel("Radius [kpc]", fontsize=14)
+
+    plt.tight_layout()
+    finalize_figure(output_path, show=show_plots)
+
+
+
+
+def _save_escape_fraction_table_fits(profiles_dict, output_path: Path):
+    hdus = [fits.PrimaryHDU()]
+
+    for extname, prof in profiles_dict.items():
+        if prof is None:
+            continue
+
+        cols = [
+            fits.Column(name="R_ARCSEC", format="E", array=np.asarray(prof["r_arcsec"], dtype=np.float32)),
+            fits.Column(name="XERR_ARCSEC", format="E", array=np.asarray(prof["xerr_arcsec"], dtype=np.float32)),
+            fits.Column(name="RATIO", format="E", array=np.asarray(prof["ratio"], dtype=np.float32)),
+            fits.Column(name="RATIO_ERR", format="E", array=np.asarray(prof["ratio_err"], dtype=np.float32)),
+        ]
+        hdus.append(fits.BinTableHDU.from_columns(cols, name=extname))
+
+    fits.HDUList(hdus).writeto(output_path, overwrite=True)
 
 
 
@@ -471,6 +640,9 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
     # MASK_MODE = str(cfg.advanced.mask_mode)
     DO_FINAL_COMBINED_MODEL_PLOT = bool(cfg.advanced.do_final_combined_model_plot)
     resid_ranges = list(cfg.advanced.resid_ranges)
+
+    COMPUTE_ESCAPE_FRACTION = bool(cfg.advanced.compute_escape_fraction)
+    SAVE_ESCAPE_FRACTION_TABLE = bool(cfg.advanced.save_escape_fraction_table)
     
     # Processing/runtime aliases used throughout the old script
     vel = vel_kms
@@ -1535,7 +1707,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
             rin_pix=rin_pix_out, rout_pix=rout_pix_out,
             arcsec_per_pix=arcsec_per_pix
         )
-        finalize_figure(output_dir / "013_out+_vel_profiles.png", show=cfg.output.show_plots)
+        finalize_figure(output_dir / "013_out_plus_vel_profiles.png", show=cfg.output.show_plots)
 
 
     best_out_neg_profile = None
@@ -1549,7 +1721,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
             rin_pix=rin_pix_out, rout_pix=rout_pix_out,
             arcsec_per_pix=arcsec_per_pix
         )
-        finalize_figure(output_dir / "99_out-_vel_profiles.png", show=cfg.output.show_plots)
+        finalize_figure(output_dir / "013_out_minus_vel_profiles.png", show=cfg.output.show_plots)
 
 
     if disc_best2_for_plots is not None and (not USE_GLOBAL_BETA_DISC):
@@ -1631,6 +1803,288 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         plt.tight_layout()
         finalize_figure(output_dir / "99_vel_profiles.png", show=cfg.output.show_plots)
 
+
+    # ============================================================
+    # Escape-fraction diagnostic: v_out / (3 * v_disc)
+    # Only valid in disk_then_outflow mode
+    # ============================================================
+    escape_fraction_plot_path = None
+    escape_fraction_table_path = None
+    escape_fraction_singlecone_value = None
+    escape_fraction_singlecone_err_value = None
+
+    escape_pos = None
+    escape_neg = None
+    out_avg_prof = None
+
+    if COMPUTE_ESCAPE_FRACTION:
+        if FIT_COMPONENT_MODE != "disk_then_outflow":
+            logger.warning(
+                "compute_escape_fraction=True but FIT_COMPONENT_MODE=%s. "
+                "This diagnostic is only available in disk_then_outflow mode.",
+                FIT_COMPONENT_MODE,
+            )
+        elif best_disc_profile is None:
+            logger.warning(
+                "compute_escape_fraction=True but disc profile is not available."
+            )
+        else:
+            disc_prof = _extract_radial_profile(
+                best_profile=best_disc_profile,
+                rin_pix=rin_pix_disc,
+                rout_pix=rout_pix_disc,
+                n_shells=num_shells_disc,
+                arcsec_per_pix=arcsec_per_pix,
+            )
+
+            out_pos_prof = None
+            out_neg_prof = None
+            out_avg_prof = None
+
+            if best_out_pos_profile is not None:
+                out_pos_prof = _extract_radial_profile(
+                    best_profile=best_out_pos_profile,
+                    rin_pix=rin_pix_out,
+                    rout_pix=rout_pix_out,
+                    n_shells=num_shells_out,
+                    arcsec_per_pix=arcsec_per_pix,
+                )
+
+            if best_out_neg_profile is not None:
+                out_neg_prof = _extract_radial_profile(
+                    best_profile=best_out_neg_profile,
+                    rin_pix=rin_pix_out,
+                    rout_pix=rout_pix_out,
+                    n_shells=num_shells_out,
+                    arcsec_per_pix=arcsec_per_pix,
+                )
+
+            # --------------------------------------------------------
+            # Single-shell outflow case: compute one value, but still
+            # create and save a one-point plot/FITS table.
+            # --------------------------------------------------------
+            if int(num_shells_out) == 1:
+                if out_pos_prof is not None:
+                    r0 = np.asarray(out_pos_prof["r_arcsec"], dtype=float)[0]
+
+                    disc_v_interp = _interp_with_nan(
+                        np.array([r0]), disc_prof["r_arcsec"], disc_prof["v"]
+                    )[0]
+                    disc_e_interp = _interp_with_nan(
+                        np.array([r0]), disc_prof["r_arcsec"], disc_prof["v_err"]
+                    )[0]
+
+                    ratio, ratio_err = _ratio_and_uncertainty(
+                        np.array([out_pos_prof["v"][0]]),
+                        np.array([out_pos_prof["v_err"][0]]),
+                        np.array([disc_v_interp]),
+                        np.array([disc_e_interp]),
+                    )
+
+                    logger.info(
+                        "Escape fraction (single cone, +): v_out/(3*v_disc) = %.3f ± %.3f",
+                        float(ratio[0]),
+                        float(ratio_err[0]),
+                    )
+
+                    escape_fraction_singlecone_value = float(ratio[0])
+                    escape_fraction_singlecone_err_value = float(ratio_err[0])
+
+                    escape_pos = {
+                        "r_arcsec": np.asarray(out_pos_prof["r_arcsec"], dtype=float),
+                        "xerr_arcsec": np.asarray(out_pos_prof["xerr_arcsec"], dtype=float),
+                        "ratio": np.asarray(ratio, dtype=float),
+                        "ratio_err": np.asarray(ratio_err, dtype=float),
+                    }
+
+                elif out_neg_prof is not None:
+                    r0 = np.asarray(out_neg_prof["r_arcsec"], dtype=float)[0]
+
+                    disc_v_interp = _interp_with_nan(
+                        np.array([r0]), disc_prof["r_arcsec"], disc_prof["v"]
+                    )[0]
+                    disc_e_interp = _interp_with_nan(
+                        np.array([r0]), disc_prof["r_arcsec"], disc_prof["v_err"]
+                    )[0]
+
+                    ratio, ratio_err = _ratio_and_uncertainty(
+                        np.array([out_neg_prof["v"][0]]),
+                        np.array([out_neg_prof["v_err"][0]]),
+                        np.array([disc_v_interp]),
+                        np.array([disc_e_interp]),
+                    )
+
+                    logger.info(
+                        "Escape fraction (single cone, -): v_out/(3*v_disc) = %.3f ± %.3f",
+                        float(ratio[0]),
+                        float(ratio_err[0]),
+                    )
+
+                    escape_fraction_singlecone_value = float(ratio[0])
+                    escape_fraction_singlecone_err_value = float(ratio_err[0])
+
+                    escape_neg = {
+                        "r_arcsec": np.asarray(out_neg_prof["r_arcsec"], dtype=float),
+                        "xerr_arcsec": np.asarray(out_neg_prof["xerr_arcsec"], dtype=float),
+                        "ratio": np.asarray(ratio, dtype=float),
+                        "ratio_err": np.asarray(ratio_err, dtype=float),
+                    }
+
+                else:
+                    logger.warning(
+                        "compute_escape_fraction=True but no valid single-shell outflow profile was available."
+                    )
+
+                # Save a one-point plot in the single-shell case
+                if (escape_pos is not None) or (escape_neg is not None):
+                    escape_fraction_plot_path = output_dir / "017_escape_fraction_profile.png"
+
+                    _plot_escape_fraction_profile(
+                        output_path=escape_fraction_plot_path,
+                        scale_kpc_per_arcsec=scale,
+                        radius_range_model_disc=radius_range_model_disc,
+                        radius_range_model_out=radius_range_model_out,
+                        disc_profile=disc_prof,
+                        out_pos_profile=escape_pos,
+                        out_neg_profile=escape_neg,
+                        out_avg_profile=None,
+                        show_plots=cfg.output.show_plots,
+                    )
+
+                # Save optional FITS table also in the single-shell case
+                if SAVE_ESCAPE_FRACTION_TABLE and ((escape_pos is not None) or (escape_neg is not None)):
+                    try:
+                        escape_fraction_table_path = output_dir / "escape_fraction_profile.fits"
+                        _save_escape_fraction_table_fits(
+                            {
+                                "ESCAPE_POS": escape_pos,
+                                "ESCAPE_NEG": escape_neg,
+                                "ESCAPE_AVG": None,
+                            },
+                            escape_fraction_table_path,
+                        )
+                    except Exception as e:
+                        logger.warning("Failed to save escape fraction FITS table: %r", e)
+
+            # --------------------------------------------------------
+            # Multi-shell / general case
+            # --------------------------------------------------------
+            else:
+                def _build_escape_profile(out_prof):
+                    if out_prof is None or disc_prof is None:
+                        return None
+
+                    disc_v_interp = _interp_with_nan(
+                        out_prof["r_arcsec"], disc_prof["r_arcsec"], disc_prof["v"]
+                    )
+                    disc_e_interp = _interp_with_nan(
+                        out_prof["r_arcsec"], disc_prof["r_arcsec"], disc_prof["v_err"]
+                    )
+
+                    ratio, ratio_err = _ratio_and_uncertainty(
+                        out_prof["v"],
+                        out_prof["v_err"],
+                        disc_v_interp,
+                        disc_e_interp,
+                    )
+
+                    return {
+                        "r_arcsec": np.asarray(out_prof["r_arcsec"], dtype=float),
+                        "xerr_arcsec": np.asarray(out_prof["xerr_arcsec"], dtype=float),
+                        "ratio": np.asarray(ratio, dtype=float),
+                        "ratio_err": np.asarray(ratio_err, dtype=float),
+                    }
+
+                escape_pos = _build_escape_profile(out_pos_prof)
+                escape_neg = _build_escape_profile(out_neg_prof)
+
+                # Average of the two cones, shell by shell
+                if (escape_pos is not None) and (escape_neg is not None):
+                    v_avg = 0.5 * (out_pos_prof["v"] + out_neg_prof["v"])
+                    e_avg = 0.5 * np.sqrt(out_pos_prof["v_err"]**2 + out_neg_prof["v_err"]**2)
+
+                    disc_v_interp = _interp_with_nan(
+                        out_pos_prof["r_arcsec"], disc_prof["r_arcsec"], disc_prof["v"]
+                    )
+                    disc_e_interp = _interp_with_nan(
+                        out_pos_prof["r_arcsec"], disc_prof["r_arcsec"], disc_prof["v_err"]
+                    )
+
+                    ratio_avg, ratio_avg_err = _ratio_and_uncertainty(
+                        v_avg, e_avg, disc_v_interp, disc_e_interp
+                    )
+
+                    out_avg_prof = {
+                        "r_arcsec": np.asarray(out_pos_prof["r_arcsec"], dtype=float),
+                        "xerr_arcsec": np.asarray(out_pos_prof["xerr_arcsec"], dtype=float),
+                        "ratio": np.asarray(ratio_avg, dtype=float),
+                        "ratio_err": np.asarray(ratio_avg_err, dtype=float),
+                    }
+                else:
+                    out_avg_prof = None
+
+                if (escape_pos is None) and (escape_neg is None):
+                    logger.warning(
+                        "compute_escape_fraction=True but no valid outflow escape-fraction profile could be built."
+                    )
+                else:
+                    escape_fraction_plot_path = output_dir / "017_escape_fraction_profile.png"
+
+                    # Single-cone: plot only the available cone
+                    if (escape_pos is not None) and (escape_neg is None):
+                        _plot_escape_fraction_profile(
+                            output_path=escape_fraction_plot_path,
+                            scale_kpc_per_arcsec=scale,
+                            radius_range_model_disc=radius_range_model_disc,
+                            radius_range_model_out=radius_range_model_out,
+                            disc_profile=disc_prof,
+                            out_pos_profile=escape_pos,
+                            out_neg_profile=None,
+                            out_avg_profile=None,
+                            show_plots=cfg.output.show_plots,
+                        )
+
+                    elif (escape_neg is not None) and (escape_pos is None):
+                        _plot_escape_fraction_profile(
+                            output_path=escape_fraction_plot_path,
+                            scale_kpc_per_arcsec=scale,
+                            radius_range_model_disc=radius_range_model_disc,
+                            radius_range_model_out=radius_range_model_out,
+                            disc_profile=disc_prof,
+                            out_pos_profile=None,
+                            out_neg_profile=escape_neg,
+                            out_avg_profile=None,
+                            show_plots=cfg.output.show_plots,
+                        )
+
+                    # Bicone: plot both cones and the average
+                    else:
+                        _plot_escape_fraction_profile(
+                            output_path=escape_fraction_plot_path,
+                            scale_kpc_per_arcsec=scale,
+                            radius_range_model_disc=radius_range_model_disc,
+                            radius_range_model_out=radius_range_model_out,
+                            disc_profile=disc_prof,
+                            out_pos_profile=escape_pos,
+                            out_neg_profile=escape_neg,
+                            out_avg_profile=out_avg_prof,
+                            show_plots=cfg.output.show_plots,
+                        )
+
+                    # Save optional FITS table
+                    if SAVE_ESCAPE_FRACTION_TABLE:
+                        try:
+                            escape_fraction_table_path = output_dir / "escape_fraction_profile.fits"
+                            _save_escape_fraction_table_fits(
+                                {
+                                    "ESCAPE_POS": escape_pos,
+                                    "ESCAPE_NEG": escape_neg,
+                                    "ESCAPE_AVG": out_avg_prof,
+                                },
+                                escape_fraction_table_path,
+                            )
+                        except Exception as e:
+                            logger.warning("Failed to save escape fraction FITS table: %r", e)
 
 
     # ============================================================
@@ -1801,6 +2255,54 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         summary["outflow_neg_best_beta_err_deg"] = None
         summary["outflow_neg_best_v_kms"] = None
         summary["outflow_neg_best_v_err_kms"] = None
+
+
+
+    # ----------------------------
+    # Escape-fraction summary
+    # Only meaningful for disk_then_outflow mode
+    # ----------------------------
+    summary["compute_escape_fraction"] = bool(COMPUTE_ESCAPE_FRACTION)
+    summary["escape_fraction_singlecone"] = None
+    summary["escape_fraction_singlecone_err"] = None
+    summary["escape_fraction_plot"] = None
+    summary["escape_fraction_table_fits"] = None
+
+    summary["escape_fraction_pos_available"] = None
+    summary["escape_fraction_neg_available"] = None
+    summary["escape_fraction_avg_available"] = None
+
+    if COMPUTE_ESCAPE_FRACTION and FIT_COMPONENT_MODE == "disk_then_outflow":
+        # These variables should have been set in the escape-fraction block
+        # If they do not exist, keep the fields as None
+        if "escape_fraction_plot_path" in locals() and escape_fraction_plot_path is not None:
+            summary["escape_fraction_plot"] = str(Path(escape_fraction_plot_path).name)
+
+        if "escape_fraction_table_path" in locals() and escape_fraction_table_path is not None:
+            summary["escape_fraction_table_fits"] = str(Path(escape_fraction_table_path).name)
+
+        if "escape_pos" in locals():
+            summary["escape_fraction_pos_available"] = escape_pos is not None
+        else:
+            summary["escape_fraction_pos_available"] = False
+
+        if "escape_neg" in locals():
+            summary["escape_fraction_neg_available"] = escape_neg is not None
+        else:
+            summary["escape_fraction_neg_available"] = False
+
+        if "out_avg_prof" in locals():
+            summary["escape_fraction_avg_available"] = out_avg_prof is not None
+        else:
+            summary["escape_fraction_avg_available"] = False
+
+        # Single-shell/single-cone compact value
+        if "escape_fraction_singlecone_value" in locals() and escape_fraction_singlecone_value is not None:
+            summary["escape_fraction_singlecone"] = float(escape_fraction_singlecone_value)
+
+        if "escape_fraction_singlecone_err_value" in locals() and escape_fraction_singlecone_err_value is not None:
+            summary["escape_fraction_singlecone_err"] = float(escape_fraction_singlecone_err_value)
+
 
     # Save summary only once, at the very end
     if cfg.output.save_summary_json:

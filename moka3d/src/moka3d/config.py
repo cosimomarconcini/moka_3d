@@ -113,6 +113,8 @@ class AdvancedConfig:
     do_final_combined_model_plot: bool = True
     outflow_axis_sign: int = 1
     resid_ranges: List[float] = field(default_factory=lambda: [0.15, 55, 55])
+    compute_escape_fraction: bool = False
+    save_escape_fraction_table: bool = True
 
 
 @dataclass
