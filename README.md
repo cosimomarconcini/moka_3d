@@ -68,7 +68,7 @@ If no errors show up then everything worked correctly and you can proceed to fit
 
 This will run the config_basic.yaml file with all the necessary info on your data and fit type.
 
-moka3d run config_basic.yaml 
+moka3d run config_moka.yaml 
 
 # Citing MOKA 3D in your work
 
