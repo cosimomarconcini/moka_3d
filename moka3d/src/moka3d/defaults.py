@@ -18,8 +18,8 @@ input:
   save_all_outputs: false
 
 target:
-  agn_ra: 349.598450
-  agn_dec: -42.370420
+  agn_ra: '23h18m23.6280s'
+  agn_dec: '-42d22m13.512s'
   center_mode: null
   center_xy_manual: null
   redshift: 0.005410
@@ -49,19 +49,50 @@ maps:
 
 fit:
   component_mode: disk_then_outflow
-  radius_range_model_disc: [0.0, 40.0]
-  radius_range_model_out: [0.0, 30.0]
-  num_shells_disc: 30
-  num_shells_out: 30
-  beta_grid_disc: [50, 100, 5]
-  v_grid_disc: [0, 400, 20]
-  outflow_pa_deg: 105.0
-  outflow_opening_deg: 120.0
-  outflow_double_cone: true
-  outflow_mask_mode: bicone
-  beta_grid_out: [50, 130, 5]
-  v_grid_out: [100, 1300, 20]
-  disc_pa_deg: null
+
+  disc:
+    mode: independent
+
+    radius_range_arcsec: [0.0, 40.0]
+    num_shells: 30
+
+    pa_deg: null
+    pa_unc_deg: null
+
+    beta_grid_deg: [50, 100, 5]
+
+    independent:
+      v_grid_kms: [0.0, 400.0, 20.0]
+
+    kepler:
+      mbh_grid_msun: [1.0e6, 1.0e11]
+      n_geom: 50
+
+    nsc:
+      re_pc: 5.0
+      a_grid: [1.0e-3, 1.0e3]
+      n_geom: 50
+
+    plummer:
+      a_pc: 4.0
+      m0_grid_msun: [1.0e6, 1.0e11]
+      n_geom: 50
+
+    arctan:
+      rt_arcsec: null
+      vmax_grid_kms: [0.0, 400.0, 20.0]
+
+  outflow:
+    radius_range_arcsec: [0.0, 30.0]
+    num_shells: 30
+
+    pa_deg: 105.0
+    opening_deg: 120.0
+    double_cone: true
+    mask_mode: bicone
+
+    beta_grid_deg: [50, 130, 5]
+    v_grid_kms: [100.0, 1300.0, 20.0]
 
 
 advanced:
@@ -72,7 +103,6 @@ advanced:
   perc_weights: [1, 1]
   npt: 200000
   use_global_beta_disc: true
-  disc_fit_mode: independent
   disc_theta_range:
     - [0, 1]
   disc_phi_range:
@@ -80,7 +110,6 @@ advanced:
   disc_zeta_range_mode: auto_from_psf
   use_global_beta_out: true
   mask_disk_with_outflow: true
-  mask_mode: zero
   do_final_combined_model_plot: true
   outflow_axis_sign: 1
   resid_ranges: [0.15, 55, 55]

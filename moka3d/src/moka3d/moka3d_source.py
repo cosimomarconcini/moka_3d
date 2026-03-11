@@ -38,6 +38,10 @@ from astropy.wcs.utils import proj_plane_pixel_scales
 from matplotlib.patches import Circle
 
 from matplotlib.ticker import AutoMinorLocator
+import json
+
+from .plotting import finalize_figure
+
 
 class utils():
 
@@ -1407,7 +1411,7 @@ def pick_center(wcs2d, obscube, vel_kms, agn_ra, agn_dec, center_mode, center_xy
 
 def observed_wcs_params_from_vel(vel_kms, i0, x_cen, y_cen, pixscale, nrebin):
     """
-    Build crpix/crval/cdelt for km.observed.
+    Build crpix/crval/cdelt for observed.
     Preserve the actual velocity axis defined in vel_kms.
     Returns: crpix, crval, cdelt, dv, ref_pix_0based, x0_bin, y0_bin
     """
@@ -1518,7 +1522,7 @@ def _parse_wavelength_input(wl_value, wl_unit_hint, target_unit):
 
 def observed_wcs_params(vel_kms, i0, x_cen, y_cen, pixscale, nrebin):
     """
-    Build crpix/crval/cdelt for km.observed.
+    Build crpix/crval/cdelt for observed.
     Preserve the actual velocity axis; use i0 as the reference pixel.
     Keep dv sign consistent with velocity array.
     """
@@ -2907,7 +2911,7 @@ def plot_kin_maps_3x3(
 #%% functions to built the model
 
 def _as_shell_ranges(r_range, n_shells):
-    """Return radius_range formatted for km.model:
+    """Return radius_range formatted for model:
        - if n_shells == 1: returns [r0, r1] (unchanged)
        - if n_shells > 1 : returns [[r0,r1],[r1,r2],...]
     """
@@ -3015,12 +3019,13 @@ def set_fit_context(**kwargs):
     Call this ONCE in your main code after you define obs, vel axis, origin, etc.
 
     Example:
-        km.set_fit_context(
+        set_fit_context(
             geometry=geometry,
             FIT_MODE=FIT_MODE,
             obs=obs,
             vel_axis=vel.value,
             origin=origin,
+            pixscale= pixscale,
             xy_AGN=xy_AGN,
             gamma_model=gamma_model,
             num_shells=num_shells,
@@ -3053,7 +3058,7 @@ def _ctx_get(key, default=None, *, required=False):
         return _FIT_CTX[key]
     if required:
         raise KeyError(f"km context missing required key: '{key}'. "
-                       f"Did you forget km.set_fit_context({key}=...)?")
+                       f"Did you forget set_fit_context({key}=...)?")
     return default
 
 
@@ -3240,7 +3245,7 @@ def plot_bestfit_summary(best, r_edges_pix, arcsec_per_pix, scale):
     ax.errorbar(
         r_arcsec[ok_beta], beta[ok_beta],
         yerr=np.where(np.isfinite(beta_err[ok_beta]), beta_err[ok_beta], 0.0),
-        fmt="o", ms=5, mfc="white", mec="black", mew=1.2,
+        fmt="o", ms=5, mfc="none", mec="blue", mew=1.2,
         ecolor="black", elinewidth=1.2, capsize=3, capthick=1.2, zorder=3
     )
     ax.set_xlabel("Radius (arcsec)", fontsize=12)
@@ -3253,7 +3258,7 @@ def plot_bestfit_summary(best, r_edges_pix, arcsec_per_pix, scale):
     ax.errorbar(
         r_arcsec[ok_v], v[ok_v],
         yerr=np.where(np.isfinite(v_err[ok_v]), v_err[ok_v], 0.0),
-        fmt="o", ms=5, mfc="white", mec="black", mew=1.2,
+        fmt="o", ms=5, mfc="none", mec="blue", mew=1.2,
         ecolor="black", elinewidth=1.2, capsize=3, capthick=1.2, zorder=3
     )
     ax.set_xlabel("Radius (arcsec)", fontsize=12)
@@ -3267,47 +3272,36 @@ def plot_bestfit_summary(best, r_edges_pix, arcsec_per_pix, scale):
 
 
 def build_v_grid_and_label(geometry: str, fit_mode: str):
-   
     geom = str(geometry).lower()
     mode = str(fit_mode)
 
-    # These come from km.set_fit_context(...)
     v_min  = float(_ctx_get("v_min", required=True))
     v_max  = float(_ctx_get("v_max", required=True))
     step_v = float(_ctx_get("step_v", required=True))
-
-    # (Optional) allow overriding number of points for geomspace grids
     n_geom = int(_ctx_get("n_geom_v", 50))
 
-    # ------------------------------------------------------------------
-    # Mode-specific meanings
-    # ------------------------------------------------------------------
     if geom == "cylindrical" and mode == "disk_kepler":
-        # Here v is actually MBH grid (Msun)
-        v_arr = np.geomspace(1e3, 1e11, n_geom)
+        v_arr = np.geomspace(v_min, v_max, n_geom)
         return v_arr, None, r"$M_\bullet$ ($M_\odot$)"
 
     if geom == "cylindrical" and mode == "NSC":
-        # Here v is actually A (Msun/pc) grid
-        v_arr = np.geomspace(1e3, 1e11, n_geom)
-        return v_arr, None, r"$A$ ($M_\odot$/pc)"
+        v_arr = np.geomspace(v_min, v_max, n_geom)
+        return v_arr, None, r"$A$"
 
     if geom == "cylindrical" and mode == "Plummer":
-        # Here v is actually M0 grid (Msun)
-        v_arr = np.geomspace(1e3, 1e11, n_geom)
+        v_arr = np.geomspace(v_min, v_max, n_geom)
         return v_arr, None, r"$M_0$ ($M_\odot$)"
 
     if geom == "cylindrical" and mode == "disk_arctan":
-        # Here v is Vmax (km/s); rt is a second grid
         v_arr = np.arange(v_min, v_max + step_v, step_v)
+        return v_arr, None, r"$V_{\max}$ (km s$^{-1}$)"
 
-        rt_arr = np.geomspace(0.1, 7.0, 5)
-
-        return v_arr, rt_arr, r"$V_{\max}$ (km s$^{-1}$)"
-
-    # Default: independent / generic v (km/s)
     v_arr = np.arange(v_min, v_max + step_v, step_v)
     return v_arr, None, r"$v$ (km s$^{-1}$)"
+
+
+
+
 
 def plot_residual_maps_cone(chi_squared_map, beta_array, v_array, num_shells, *,
                             best=None, cmap='inferno', y_label=r"$v$ (km s$^{-1}$)"):
@@ -3368,7 +3362,7 @@ def plot_residual_maps_cone(chi_squared_map, beta_array, v_array, num_shells, *,
             vmax=vmax
         )
 
-        ax.set_title(f"Shell {i+1}", fontsize=11)
+        ax.set_title(f"Shell {i+1}", fontsize=11, weight = 'bold')
         ax.set_xlabel(r"$\beta$ (deg)", fontsize=10)
         if i % ncols == 0:
             ax.set_ylabel(y_label, fontsize=10)
@@ -3852,6 +3846,10 @@ def vplummer_astropy(rad, theta, phi, vplummerpars):
 
     return vel_ms/1e3
 
+
+
+
+
 def _plot_v_profile(best_dict, n_shells, title, scale_kpc_per_arcsec, rin_pix, rout_pix, arcsec_per_pix):
     if best_dict is None:
         return
@@ -3860,7 +3858,6 @@ def _plot_v_profile(best_dict, n_shells, title, scale_kpc_per_arcsec, rin_pix, r
     if v_shell.size == 0:
         return
 
-    # uncertainty key names differ depending on your summarize function
     v_err = best_dict.get("v_err", None)
     if v_err is None:
         v_err = best_dict.get("v_unc", None)
@@ -3869,38 +3866,41 @@ def _plot_v_profile(best_dict, n_shells, title, scale_kpc_per_arcsec, rin_pix, r
     else:
         v_err = np.asarray(v_err, float)
 
-    # shell radii: use the SAME shelling as the fit (uniform in pixel radius)
     edges_pix = np.linspace(float(rin_pix), float(rout_pix), int(n_shells) + 1)
     rmid_pix = 0.5 * (edges_pix[:-1] + edges_pix[1:])
     rmid_arcsec = rmid_pix * float(arcsec_per_pix)
 
-    # --- plot ---
     fig, ax = plt.subplots(figsize=(6.5, 4.8), dpi=300)
     ax.xaxis.set_minor_locator(AutoMinorLocator(2))
     ax.yaxis.set_minor_locator(AutoMinorLocator(2))
     ax.tick_params(axis='both', labelsize=12)
-    
-    
-    
-    ax.errorbar(rmid_arcsec, v_shell, yerr=v_err, fmt="o-", mfc="white", mec="black", capsize=4, mew=1.5, lw=1.5)
 
-    ax.set_xlabel(r"Radius [arcsec]", fontsize = 14)
-    ax.set_ylabel(r"Velocity [km s$^{-1}$]", fontsize = 14)
-    ax.set_title(title, fontsize = 14)
+    ax.errorbar(
+        rmid_arcsec, v_shell, yerr=v_err, color = 'black', 
+        fmt="o-", mfc="none", mec="blue", ecolor = 'black', capsize=4, mew=1., lw=1.
+    )
+
+    ax.set_xlabel(r"Radius [arcsec]", fontsize=11)
+    ax.set_ylabel(r"Velocity [km s$^{-1}$]", fontsize=11)
+    ax.set_title(title, fontsize=11)
     ax.grid(alpha=0.2)
 
-    # top axis in kpc
-    ax_top = ax.twiny()
-    ax_top.tick_params(axis='both', labelsize=12)
+    xmax_arc = float(np.nanmax(rmid_arcsec)) if rmid_arcsec.size else 0.0
+    ax.set_xlim(0.0, xmax_arc * 1.02 if xmax_arc > 0 else 1.0)
 
-    ax_top.set_xlim(ax.get_xlim())
-    tick_arc = ax.get_xticks()
-    ax_top.set_xticks(tick_arc)
-    ax_top.set_xticklabels([f"{t*scale_kpc_per_arcsec:.1f}" for t in tick_arc])
-    ax_top.set_xlabel("Radius [kpc]", fontsize = 14)
+    def a2k(x):
+        return x * float(scale_kpc_per_arcsec)
+
+    def k2a(x):
+        return x / float(scale_kpc_per_arcsec)
+
+    secax = ax.secondary_xaxis("top", functions=(a2k, k2a))
+    secax.set_xlabel("Radius [kpc]", fontsize=11)
+    secax.tick_params(axis='both', labelsize=10)
 
     plt.tight_layout()
-    #plt.show()
+
+
 
 
 def plot_beta_profile(best, n_shells, title, rin_pix, rout_pix, arcsec_per_pix, scale_kpc_per_arcsec):
@@ -3912,15 +3912,15 @@ def plot_beta_profile(best, n_shells, title, rin_pix, rout_pix, arcsec_per_pix, 
     rmid_arc  = 0.5 * (edges_arc[:-1] + edges_arc[1:])
     xerr_arc  = 0.5 * (edges_arc[1:] - edges_arc[:-1])
 
-    fig, ax = plt.subplots(figsize=(6.5, 4.8), dpi=200)
+    fig, ax = plt.subplots(figsize=(6.5, 4.8), dpi=300)
     ax.xaxis.set_minor_locator(AutoMinorLocator(2))
     ax.yaxis.set_minor_locator(AutoMinorLocator(2))
-    ax.tick_params(which="minor", length=3)
+    ax.tick_params(which="both", length=2, direction = 'in',  labelsize = 11)
 
-    ax.errorbar(rmid_arc, b, xerr=xerr_arc, yerr=be, fmt="o-", mfc="white", mec="black", capsize=4)
-    ax.set_xlabel("Radius [arcsec]")
-    ax.set_ylabel(r"Inclination $\beta$ [deg]")
-    ax.set_title(title)
+    ax.errorbar(rmid_arc, b, xerr=xerr_arc, yerr=be, fmt="o-", mfc="none", color = 'black',  ecolor = 'black', mec="blue", capsize=4)
+    ax.set_xlabel("Radius [arcsec]", fontsize = 11)
+    ax.set_ylabel(r"Inclination $\beta$ [deg]", fontsize = 11)
+    ax.set_title(title, fontsize = 11)
     ax.grid(alpha=0.2)
 
     ax_top = ax.twiny()
@@ -3930,10 +3930,12 @@ def plot_beta_profile(best, n_shells, title, rin_pix, rout_pix, arcsec_per_pix, 
     ax.set_xticks(tick_arc)
     ax_top.set_xticks(tick_arc)
     ax_top.set_xticklabels([f"{t * scale_kpc_per_arcsec:.2f}" for t in tick_arc])
-    ax_top.set_xlabel("Radius [kpc]")
+    ax_top.set_xlabel("Radius [kpc]", fontsize = 11)
+    ax_top.tick_params(which="both", length=2, direction = 'in',  labelsize = 11)
+
+
 
     plt.tight_layout()
-    #plt.show()
     
     
 def plot_total_kappa_landscape(chi_squared_map, beta_array, mbh_array, *, best_kepl=None):
@@ -3957,7 +3959,7 @@ def plot_total_kappa_landscape(chi_squared_map, beta_array, mbh_array, *, best_k
     if best_kepl is not None:
         bx  = best_kepl['beta_star']
         bm  = best_kepl['mbh_star']
-        ax.plot(bx, bm, marker='s', ms=7, mfc='white', mec='black', mew=1.2, zorder=5)
+        ax.plot(bx, bm, marker='s', ms=7, mfc='none', mec='black', mew=1.2, zorder=5)
         # crude 1σ belt along β using your Δκ inflation rule
         total_beta = np.nanmin(total, axis=1)         # Σ_s min_v κ_s(β)
         kmin = np.nanmin(total_beta)
@@ -3994,7 +3996,7 @@ def plot_total_kappa_nsc(chi_squared_map, beta_array, A_array, *, best_nsc=None)
     if best_nsc is not None:
         bx  = best_nsc['beta_star']
         bm  = best_nsc['A_star']
-        ax.plot(bx, bm, marker='s', ms=7, mfc='white', mec='black', mew=1.2, zorder=5)
+        ax.plot(bx, bm, marker='s', ms=7, mfc='none', mec='blue', mew=1.2, zorder=5)
         # crude 1σ belt along β using your Δκ inflation rule
         total_beta = np.nanmin(total, axis=1)         # Σ_s min_v κ_s(β)
         kmin = np.nanmin(total_beta)
@@ -4030,7 +4032,7 @@ def plot_total_kappa_plu(chi_squared_map, beta_array, M0_array, *, best_plu=None
     if best_plu is not None:
         bx  = best_plu['beta_star']
         bm  = best_plu['M0_star']
-        ax.plot(bx, bm, marker='s', ms=7, mfc='white', mec='black', mew=1.2, zorder=5)
+        ax.plot(bx, bm, marker='s', ms=7, mfc='none', mec='blue', mew=1.2, zorder=5)
         # crude 1σ belt along β using your Δκ inflation rule
         total_beta = np.nanmin(total, axis=1)         # Σ_s min_v κ_s(β)
         kmin = np.nanmin(total_beta)
@@ -4166,7 +4168,7 @@ def plot_chi2_vs_beta_global(chi_squared_map, beta_array, v_array, *,
     # only show per-shell curves if NOT global-beta mode
     if not USE_GLOBAL_BETA:
         for s in range(n_shells):
-            ax.plot(beta, np.log10(chi_beta_per_shell[s]), alpha=0.25, lw=1.0)
+            ax.plot(beta, np.log10(chi_beta_per_shell[s]), alpha=0.25, lw=1.0, c = 'black')
 
     ax.plot(beta, np.log10(chi_beta_comb), lw=0.7, c = 'black')
     ax.scatter(beta, np.log10(chi_beta_comb), marker = 'o', s = 30, facecolors = 'none', color = 'blue')
@@ -4178,9 +4180,9 @@ def plot_chi2_vs_beta_global(chi_squared_map, beta_array, v_array, *,
         ax.axvspan(beta_lo, beta_hi, color="cyan", alpha=0.2, zorder=0)
 
 
-    ax.set_xlabel(r"Inclination $\beta$ (deg)", fontsize = 14)
-    ax.set_ylabel(r"Log($\chi^2$)", fontsize = 14)
-    ax.set_title(title, fontsize = 14)
+    ax.set_xlabel(r"Inclination $\beta$ (deg)", fontsize = 11)
+    ax.set_ylabel(r"Log($\chi^2$)", fontsize = 11)
+    ax.set_title(title, fontsize = 11)
 
 
 
@@ -4191,7 +4193,6 @@ def plot_chi2_vs_beta_global(chi_squared_map, beta_array, v_array, *,
 
     plt.tight_layout()
     
-    #plt.show()
 
 
     return beta_best, beta, chi_beta_comb, chi_beta_per_shell
@@ -4280,7 +4281,7 @@ def plot_corner_kappa(chi_squared_map, beta_array, mbh_array, *, best_kepl=None)
     # Best point markers + guide lines
     if best_kepl is not None:
         bx, bm = best_kepl['beta_star'], best_kepl['mbh_star']
-        ax.plot(bx, np.log10(bm), marker='s', ms=7, mfc='white', mec='black', mew=1.2)
+        ax.plot(bx, np.log10(bm), marker='s', ms=7, mfc='none', mec='blue', mew=1.2)
         # guide lines into the marginals
         ax.axvline(bx, ls='--', lw=1.1, c='white', alpha=0.9)
         ax.axhline(np.log10(bm), ls='--', lw=1.1, c='white', alpha=0.9)
@@ -4372,7 +4373,7 @@ def plot_corner_kappa_nsc(chi_squared_map, beta_array, A_array, *, best_nsc=None
     # Best point markers + guide lines
     if best_nsc is not None:
         bx, bm = best_nsc['beta_star'], best_nsc['A_star']
-        ax.plot(bx, np.log10(bm), marker='s', ms=7, mfc='white', mec='black', mew=1.2)
+        ax.plot(bx, np.log10(bm), marker='s', ms=7, mfc='none', mec='blue', mew=1.2)
         # guide lines into the marginals
         ax.axvline(bx, ls='--', lw=1.1, c='white', alpha=0.9)
         ax.axhline(np.log10(bm), ls='--', lw=1.1, c='white', alpha=0.9)
@@ -4678,9 +4679,7 @@ def show_shells_overlay(
     debug_intrinsic=False, xlimit=None, ylimit=None
 ):
    
-    # --- get geometry from km context (required) ---
-    # This function assumes you moved the context system into moka3d_source.py
-    # If you did NOT, replace geometry retrieval with your global variable.
+    # --- get geometry from km context ---
     geom = _ctx_get("geometry", required=True).lower()
 
     # ---- get math angle for MAJOR axis (restores your legacy convention) ----
@@ -4759,7 +4758,8 @@ def show_shells_overlay(
     )
 
     cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.0)
-    cbar.set_label("Log(Flux)", fontsize=12)
+    cbar.set_label("Log(Flux)", fontsize=11)
+    cbar.ax.tick_params(labelsize=11)   
 
     xmin, xmax, ymin, ymax = im.get_extent()
     ax.set_xlim(xmin, xmax)
@@ -4829,14 +4829,14 @@ def show_shells_overlay(
     # Labels / limits
     # -----------------------------
     ax.scatter([0.0], [0.0], s=110, c="cyan", marker="*", edgecolor="black", zorder=7)
-    ax.set_xlabel(r"$\Delta$ X [arcsec]", fontsize=12)
-    ax.set_ylabel(r"$\Delta$ Y [arcsec]", fontsize=12)
+    ax.set_xlabel(r"$\Delta$ X [arcsec]", fontsize=11)
+    ax.set_ylabel(r"$\Delta$ Y [arcsec]", fontsize=11)
     ax.set_aspect("equal")
 
     if title is None:
         kind = "disk" if geom == "cylindrical" else "conical"
         title = f"{kind} shells (β={inc_deg:.1f}°, PA_in={float(pa_deg)%360:.1f}°)"
-    ax.set_title(title)
+    ax.set_title(title, fontsize = 11)
 
     if (xlimit is not None) and (ylimit is not None):
         ax.set_xlim(xlimit[0], xlimit[1])
@@ -4846,7 +4846,6 @@ def show_shells_overlay(
     ax.tick_params(axis="both", which="minor", labelsize=8, length=3, width=0.8)
 
     plt.tight_layout()
-    #plt.show()
     
 def plot_corner_kappa_plu(chi_squared_map, beta_array, M0_array, *, best_plu=None):
     # aggregate over shells
@@ -4926,7 +4925,7 @@ def plot_corner_kappa_plu(chi_squared_map, beta_array, M0_array, *, best_plu=Non
     # Best point markers + guide lines
     if best_plu is not None:
         bx, bm = best_plu['beta_star'], best_plu['M0_star']
-        ax.plot(bx, np.log10(bm), marker='s', ms=7, mfc='white', mec='black', mew=1.2)
+        ax.plot(bx, np.log10(bm), marker='s', ms=7, mfc='none', mec='blue', mew=1.2)
         # guide lines into the marginals
         ax.axvline(bx, ls='--', lw=1.1, c='white', alpha=0.9)
         ax.axhline(np.log10(bm), ls='--', lw=1.1, c='white', alpha=0.9)
@@ -4958,12 +4957,61 @@ def summarize_global_beta_param(chi_squared_map, beta_array, p_array, sigma_scal
 
     beta_err *= sigma_scale; p_err *= sigma_scale
 
-    print("\n=== Best fit (Δκ=1 ~{:.0f}σ) ===".format(sigma_scale))
+    print("\n=== Best fit ===")
     print(f"β*  = {beta_star:.2f} ± {beta_err:.2f} deg")
     label = f"{pname} ({punits})" if punits else pname
     print(f"{label} = {p_star:.3g} ± {p_err:.3g}")
 
     return dict(beta_star=beta_star, beta_err=beta_err, p_star=p_star, p_err=p_err, total_kappa=total)
+
+
+
+def plot_chi2_vs_param_global(best_dict, p_array, *, title="", x_label="Parameter", logx=False, logy=True):
+    """
+    Plot global chi2 vs fitted physical parameter at the best beta.
+    best_dict must be the output of summarize_global_beta_param(...).
+    """
+    if best_dict is None:
+        return None
+
+    total = np.asarray(best_dict.get("total_kappa", None), dtype=float)
+    if total.ndim != 2:
+        return None
+
+    p_array = np.asarray(p_array, dtype=float)
+    beta_star = float(best_dict["beta_star"])
+    p_star = float(best_dict["p_star"])
+    p_err = float(best_dict.get("p_err", np.nan))
+
+    # identify closest beta row
+    # total has shape (n_beta, n_p)
+    # use minimum over beta if you prefer fully marginalized curve:
+    # chi_p = np.nanmin(total, axis=0)
+    ib = int(np.nanargmin(np.nanmin(np.abs(total - np.nanmin(total)), axis=1)))
+    chi_p = total[ib, :]
+
+    fig, ax = plt.subplots(figsize=(6.2, 4.5), dpi=300)
+    ax.plot(p_array, np.log10(chi_p), "o-", lw=1., ms=4, c = 'black')
+    ax.axvline(p_star, ls="--", lw=1.2, c = 'red')
+    if np.isfinite(p_err) and p_err > 0:
+        ax.axvspan(max(p_star - p_err, np.nanmin(p_array)), p_star + p_err, alpha=0.15, color = 'red')
+    if logx:
+        ax.set_xscale("log")
+
+    ax.set_xlabel(x_label, fontsize = 11)
+    ax.set_ylabel(r"Log($\chi^2$)", fontsize = 11)
+    ax.set_title(title, fontsize = 11)
+    ax.tick_params(axis='both', labelsize=9)
+    ax.grid(alpha=0.2)
+    plt.tight_layout()
+    return fig
+
+
+
+
+
+
+
 
 def summarize_global_beta_param2(chi_squared_map, beta_array, p1_array, p2_array,
                                  sigma_scale=1.0, p1name='p1', p1units='',
@@ -5000,7 +5048,7 @@ def summarize_global_beta_param2(chi_squared_map, beta_array, p1_array, p2_array
         lab = f"{name} ({units})" if units else name
         return f"{lab} = {val:.3g} ± {err:.3g}"
 
-    print("\n=== Best fit (Δκ=1 ~{:.0f}σ) ===".format(sigma_scale))
+    print("\n=== Best fit ===")
     print(f"β*  = {beta_star:.2f} ± {beta_err:.2f} deg")
     print(_fmt(p1name, p1_star, p1_err, p1units))
     print(_fmt(p2name, p2_star, p2_err, p2units))
@@ -5147,83 +5195,6 @@ def _shell_edges_from_mask(shape, center_xy, inc_deg, pa_deg,
 
 
 
-# corret version for bi-cones
-# def _shell_edges_from_mask(shape, center_xy, inc_deg, pa_deg,
-#                           base_mask, r_min_pix, r_max_pix, n_shells,
-#                           aperture_deg=None, double_cone=False,
-#                           *, geometry=None):
-#     """
-#     Shell edges that account for bicone geometry when double_cone=True.
-#     """
-#     ny, nx = shape
-#     if geometry is None:
-#         geometry = _ctx_get("geometry", required=True)
-    
-#     if geometry.lower() == 'cylindrical':
-#         # unchanged disk logic
-#         ny, nx = shape
-#         yy, xx = np.indices((ny, nx))
-#         xx = xx - center_xy[0]
-#         yy = yy - center_xy[1]
-#         xr, yr = _rotate_to_pa(xx, yy, pa_astro_to_math(pa_deg))
-#         q = np.clip(np.cos(np.radians(inc_deg)), 0.01, 1.0)
-#         rell = np.sqrt(xr**2 + (yr / q)**2)
-#         r_obs = rell[base_mask]
-#     else:
-#         # spherical: account for bicone
-#         if double_cone:
-#             beta1, gamma1 = inc_deg, pa_deg
-#             beta2, gamma2 = 180.0 - inc_deg, (pa_deg + 180.0) % 360.0
-            
-#             # get radii from both lobes
-#             def _cone_radii(beta, gamma):
-#                 pa_math = pa_astro_to_math(gamma)
-#                 xr, yr = _rotate_to_pa(xx - center_xy[0], yy - center_xy[1], pa_math)
-#                 q = np.clip(np.sin(np.radians(beta)), 0.01, 1.0)
-#                 return np.sqrt(xr**2 + (yr / q)**2)
-            
-#             rell1 = _cone_radii(beta1, gamma1)
-#             rell2 = _cone_radii(beta2, gamma2)
-            
-#             # angular masks
-#             def _cone_angle_mask(beta, gamma):
-#                 pa_math = pa_astro_to_math(gamma)
-#                 xr, yr = _rotate_to_pa(xx - center_xy[0], yy - center_xy[1], pa_math)
-#                 q = np.clip(np.sin(np.radians(beta)), 0.01, 1.0)
-#                 ang_int = np.arctan2((yr / q), xr)
-#                 half = np.radians(aperture_deg) * 0.5
-#                 return (np.abs(ang_int) <= half)
-            
-#             cone1 = _cone_angle_mask(beta1, gamma1)
-#             cone2 = _cone_angle_mask(beta2, gamma2)
-            
-#             # combined mask and radius
-#             combined_mask = (cone1 | cone2) & base_mask
-#             rell_combined = np.where(cone1, rell1, np.where(cone2, rell2, np.inf))
-#             r_obs = rell_combined[combined_mask]
-#         else:
-#             # single cone
-#             pa_math = pa_astro_to_math(pa_deg)
-#             xr, yr = _rotate_to_pa(xx - center_xy[0], yy - center_xy[1], pa_math)
-#             q = np.clip(np.sin(np.radians(inc_deg)), 0.01, 1.0)
-#             rell = np.sqrt(xr**2 + (yr / q)**2)
-#             r_obs = rell[base_mask]
-    
-#     # compute range
-#     if r_obs.size == 0 or not np.isfinite(r_obs).any():
-#         r_lo, r_hi = r_min_pix, r_max_pix
-#     else:
-#         r_lo = max(r_min_pix, float(np.nanpercentile(r_obs, 0.0)))
-#         r_hi = min(r_max_pix, float(np.nanmax(r_obs)))
-#         if (not np.isfinite(r_lo)) or (not np.isfinite(r_hi)) or (r_hi <= r_lo):
-#             r_lo, r_hi = r_min_pix, r_max_pix
-    
-#     return np.linspace(r_lo, r_hi, n_shells + 1)
-
-
-
-
-
 
 
 
@@ -5333,8 +5304,8 @@ def make_mod(beta, vparam, obs=None, gamma_model=None,
              ncloud=None):
     """
     Drop-in replacement:
-    - You can call km.make_mod(beta, vparam, obs, gamma_model, ...)
-      OR just km.make_mod(beta, vparam) if obs/gamma_model are already in context.
+    - You can call make_mod(beta, vparam, obs, gamma_model, ...)
+      OR just make_mod(beta, vparam) if obs/gamma_model are already in context.
 
     Requires context keys (if not passed explicitly):
       geometry, FIT_MODE, obs, xy_AGN, radius_range_model, theta_range, phi_range, zeta_range,
@@ -5536,6 +5507,8 @@ def eval_kappa_for_model(model_cube, beta, pa_deg):
 
 
 
+
+
 def inspect_percentiles_at(beta, v, *, perc=(0.01, 0.99),
                            perc_weights=1.0, sigma_perc_kms=20.0,
                            rt_arcsec=None, loss="extreme", qgrid=None):
@@ -5546,37 +5519,173 @@ def inspect_percentiles_at(beta, v, *, perc=(0.01, 0.99),
 
     vel_axis = _ctx_get("vel_axis", required=True)
     origin = _ctx_get("origin", required=True)
+    arcsec_per_pix = float(_ctx_get("pixscale", required=True))
     num_shells = int(_ctx_get("num_shells", required=True))
     rin_pix = float(_ctx_get("rin_pix", required=True))
     rout_pix = float(_ctx_get("rout_pix", required=True))
     aperture = _ctx_get("aperture", default=None)
     double_cone = bool(_ctx_get("double_cone", default=False))
-    SIGMA_PERC_KMS = float(_ctx_get("SIGMA_PERC_KMS", default=20.0))
 
     # build model
-    if (geometry.lower() == 'cylindrical') and (FIT_MODE == 'disk_arctan'):
+    if (geometry.lower() == "cylindrical") and (FIT_MODE == "disk_arctan"):
         if rt_arcsec is None:
             rt_arcsec = float(_ctx_get("RT_ARCSEC", required=True))
-        model_obj = make_mod(beta, v, obs=obs, gamma_model=gamma_model,
-                             vel3_pars_override=[float(v), float(rt_arcsec)])
+        model_obj = make_mod(
+            beta, v, obs=obs, gamma_model=gamma_model,
+            vel3_pars_override=[float(v), float(rt_arcsec)]
+        )
     else:
         model_obj = make_mod(beta, v, obs=obs, gamma_model=gamma_model)
 
     kappa, pack = residuals_percentiles_cone(
-        cube_model=model_obj.cube['data'],
-        cube_obs=obs.cube['data'],
+        cube_model=model_obj.cube["data"],
+        cube_obs=obs.cube["data"],
         vel_axis=vel_axis,
         center_xy=origin,
         inc_deg=float(beta),
         pa_deg=float(gamma_model),
         n_shells=num_shells,
-        r_min_pix=rin_pix, r_max_pix=rout_pix,
-        aperture_deg=aperture, double_cone=double_cone,
-        perc=perc, sigma_perc_kms=float(sigma_perc_kms),
-        mask_mode="model", edges_mode="model", min_pixels_per_shell=2,
-        perc_weights=perc_weights, loss=loss, qgrid=qgrid
+        r_min_pix=rin_pix,
+        r_max_pix=rout_pix,
+        aperture_deg=aperture,
+        double_cone=double_cone,
+        perc=perc,
+        sigma_perc_kms=float(sigma_perc_kms),
+        mask_mode="model",
+        edges_mode="model",
+        min_pixels_per_shell=2,
+        perc_weights=perc_weights,
+        loss=loss,
+        qgrid=qgrid,
     )
-    return kappa, pack
+
+    if not isinstance(pack, tuple) or len(pack) < 2:
+        raise TypeError(
+            f"inspect_percentiles_at: unexpected pack format. "
+            f"Expected tuple with at least 2 elements, got {type(pack)}"
+        )
+
+    obs_perc = np.asarray(pack[0], dtype=float)
+    mod_perc = np.asarray(pack[1], dtype=float)
+
+    if obs_perc.ndim != 2 or obs_perc.shape[1] != 2:
+        raise ValueError(
+            f"inspect_percentiles_at: expected obs percentile array with shape (N,2), "
+            f"got {obs_perc.shape}"
+        )
+
+    if mod_perc.ndim != 2 or mod_perc.shape[1] != 2:
+        raise ValueError(
+            f"inspect_percentiles_at: expected model percentile array with shape (N,2), "
+            f"got {mod_perc.shape}"
+        )
+
+    # Prefer shell edges returned by residuals_percentiles_cone
+    if len(pack) >= 3:
+        edges_pix = np.asarray(pack[2], dtype=float)
+        if edges_pix.ndim == 1 and len(edges_pix) >= 2:
+            rmid_pix = 0.5 * (edges_pix[:-1] + edges_pix[1:])
+        else:
+            edges_pix = np.linspace(float(rin_pix), float(rout_pix), int(num_shells) + 1)
+            rmid_pix = 0.5 * (edges_pix[:-1] + edges_pix[1:])
+    else:
+        edges_pix = np.linspace(float(rin_pix), float(rout_pix), int(num_shells) + 1)
+        rmid_pix = 0.5 * (edges_pix[:-1] + edges_pix[1:])
+
+    # valid shell mask if provided
+    valid_shells = None
+    if len(pack) >= 5:
+        try:
+            valid_shells = np.asarray(pack[4], dtype=bool)
+        except Exception:
+            valid_shells = None
+
+    n = min(len(rmid_pix), len(obs_perc), len(mod_perc))
+    rr_pix = np.asarray(rmid_pix[:n], dtype=float)
+    rr = rr_pix * arcsec_per_pix
+    obs_lo = np.asarray(obs_perc[:n, 0], dtype=float)
+    obs_hi = np.asarray(obs_perc[:n, 1], dtype=float)
+    mod_lo = np.asarray(mod_perc[:n, 0], dtype=float)
+    mod_hi = np.asarray(mod_perc[:n, 1], dtype=float)
+
+    good = (
+        np.isfinite(rr) &
+        np.isfinite(obs_lo) & np.isfinite(obs_hi) &
+        np.isfinite(mod_lo) & np.isfinite(mod_hi)
+    )
+
+    if valid_shells is not None:
+        good &= valid_shells[:n]
+
+    if not np.any(good):
+        raise ValueError("inspect_percentiles_at: no valid shells available for percentile plotting.")
+
+    # use returned percentiles for legend if available
+    perc_used = perc
+    if len(pack) >= 6:
+        try:
+            perc_used_arr = np.asarray(pack[5], dtype=float).ravel()
+            if len(perc_used_arr) >= 2:
+                perc_used = (float(perc_used_arr[0]), float(perc_used_arr[1]))
+        except Exception:
+            pass
+
+    fig, ax = plt.subplots(figsize=(6.5, 4.8), dpi=300)
+
+    c_lo = "C0"
+    c_hi = "C1"
+    ms = 5
+    lw = 1.
+
+    ax.plot(
+        rr[good], obs_lo[good],
+        "o-",
+        color=c_lo,
+        ms=ms, lw=lw,
+        mfc=c_lo, mec=c_lo, mew=1,
+        label=f"Obs {perc_used[0]*100:.0f}%"
+    )
+
+    ax.plot(
+        rr[good], obs_hi[good],
+        "o-",
+        color=c_hi,
+        ms=ms, lw=lw,
+        mfc=c_hi, mec=c_hi, mew=1,
+        label=f"Obs {perc_used[1]*100:.0f}%"
+    )
+
+    ax.plot(
+        rr[good], mod_lo[good],
+        "o-",
+        color=c_lo,
+        ms=ms, lw=lw,
+        mfc="none", mec=c_lo, mew=1,
+        label=f"Mod {perc_used[0]*100:.0f}%"
+    )
+
+    ax.plot(
+        rr[good], mod_hi[good],
+        "o-",
+        color=c_hi,
+        ms=ms, lw=lw,
+        mfc="none", mec=c_hi, mew=1,
+        label=f"Mod {perc_used[1]*100:.0f}%"
+    )
+
+
+    ax.set_xlabel("Radius [arcsec]", fontsize=11)
+    ax.set_ylabel(r"Velocity [km s$^{-1}$]", fontsize = 11)
+    ax.set_title("Percentile comparison", fontsize = 11)
+    ax.grid(alpha=0.2)
+    ax.legend(fontsize=10, loc="best", ncol = 2)
+    ax.tick_params(axis='both', direction='in', labelsize=11, width=2)
+
+    plt.tight_layout()
+
+    return fig, kappa, pack
+
+
 
 
 ################################################################################################################
@@ -5605,7 +5714,7 @@ def apply_spatial_mask_to_cube(cube_spec_yx, mask_yx, mode="zero"):
 
 def make_observed_like(obs_template, cube_spec_yx, fluxmap=None, velmap=None, sigmap=None):
     """
-    Build a km.observed instance consistent with an existing one.
+    Build a observed instance consistent with an existing one.
 
     Some observed objects don't store crval/cdelt/crpix inside obs_template.cube,
     so we read them from attributes if present, otherwise from obs_template.cube.
@@ -5674,14 +5783,15 @@ def fit_gridsearch_component(
     R_nsc=5.0,
     a_plu=4.0,
     RT_ARCSEC=None,
+    n_geom_v=50,
     verbose_label="Fit"
 ):
     """
     Generic gridsearch wrapper that uses your existing:
-      - km.set_fit_context
-      - km.build_model(beta, v, ...)
-      - km.eval_kappa_for_model
-      - km.summarize_global_beta_with_per_shell_v (default summary)
+      - set_fit_context
+      - build_model(beta, v, ...)
+      - eval_kappa_for_model
+      - summarize_global_beta_with_per_shell_v (default summary)
 
     Returns dict with chi map + best parameters.
     """
@@ -5702,6 +5812,7 @@ def fit_gridsearch_component(
         obs=obs_for_fit,
         vel_axis=vel_axis,
         origin=origin,
+        pixscale = pixscale,
         xy_AGN=[0.0, 0.0],
         gamma_model=float(gamma_model_deg),
         num_shells=num_shells,
@@ -5728,6 +5839,9 @@ def fit_gridsearch_component(
         v_min=float(v_min),
         v_max=float(v_max),
         step_v=float(step_v),
+        R_nsc_default=float(R_nsc) if R_nsc is not None else 5.0,
+        a_plu_default=float(a_plu) if a_plu is not None else 4.0,
+        n_geom_v=int(n_geom_v),
     )
     
     v_array, rt_array, Y_LABEL = build_v_grid_and_label(geometry, FIT_MODE)
@@ -5779,10 +5893,36 @@ def fit_gridsearch_component(
  
     print(f"\n{verbose_label} grid evaluation completed")
 
-    # Default summary: global beta with per-shell v
-    best = summarize_global_beta_with_per_shell_v(chi_squared_map, beta_array, v_array)
-    beta_best = float(best["beta_star"])
-    v_best = float(np.nanmedian(best["v"])) if np.isfinite(best.get("v", np.nan)).any() else float(v_array[0])
+    # Default summary
+    mode = str(FIT_MODE)
+    geom = str(geometry).lower()
+
+    if geom == "cylindrical" and mode in {"disk_kepler", "NSC", "Plummer", "disk_arctan"}:
+        best = summarize_global_beta_param(
+            chi_squared_map,
+            beta_array,
+            v_array,
+            sigma_scale=1.0,
+            pname={
+                "disk_kepler": "M_BH",
+                "NSC": "A",
+                "Plummer": "M0",
+                "disk_arctan": "Vmax",
+            }[mode],
+            punits={
+                "disk_kepler": "Msun",
+                "NSC": "",
+                "Plummer": "Msun",
+                "disk_arctan": "km/s",
+            }[mode],
+        )
+        beta_best = float(best["beta_star"])
+        v_best = float(best["p_star"])
+    else:
+        best = summarize_global_beta_with_per_shell_v(chi_squared_map, beta_array, v_array)
+        beta_best = float(best["beta_star"])
+        v_best = float(np.nanmedian(best["v"])) if np.isfinite(best.get("v", np.nan)).any() else float(v_array[0])
+
 
     return dict(
         chi_squared_map=chi_squared_map,
@@ -5912,10 +6052,649 @@ def summarize_free_beta_per_shell(chi2_cube, beta_array, v_array, delta_chi2=2.3
 
 
 
+################################################################################################################
+################################################################################################################
+################################################################################################################
+################################################################################################################
+#%% Additional functions for the novello fit
+
+
+def _get_disc_global_param_best(disc_fit, disc_fit_mode):
+    if disc_fit_mode in {"disk_kepler", "NSC", "Plummer", "disk_arctan"}:
+        best = disc_fit.get("best", {})
+        return float(best.get("p_star", disc_fit.get("v_best", np.nan)))
+    return float(disc_fit.get("v_best", np.nan))
 
 
 
 
+
+
+def _extract_best_fit_with_uncertainties(fit: dict | None) -> dict | None:
+    """
+    Extract best-fit beta/v-like quantity and approximate uncertainties from the fit dictionary.
+
+    For standard fits:
+        returns beta_best, beta_err, v_best, v_err
+
+    For physical disc fits:
+        v_best / v_err contain the fitted global parameter (MBH, A, M0, or Vmax),
+        so the caller can still log them generically.
+    """
+    if fit is None:
+        return None
+
+    beta_best = float(fit.get("beta_best", np.nan))
+    v_best = float(fit.get("v_best", np.nan))
+
+    beta_err = np.nan
+    v_err = np.nan
+
+    best = fit.get("best", None)
+    if isinstance(best, dict):
+        # physical/global-parameter summary
+        if "p_star" in best:
+            beta_err = float(best.get("beta_err", np.nan))
+            v_best = float(best.get("p_star", v_best))
+            v_err = float(best.get("p_err", np.nan))
+
+        # old per-shell/global-beta summary
+        else:
+            beta_err = float(best.get("beta_err_scalar", np.nan))
+
+            v_arr = np.asarray(best.get("v", []), dtype=float)
+            v_err_arr = np.asarray(best.get("v_err", []), dtype=float)
+
+            if v_arr.size > 0 and v_err_arr.size > 0 and np.isfinite(v_best):
+                idx = int(np.nanargmin(np.abs(v_arr - v_best)))
+                if idx < v_err_arr.size:
+                    v_err = float(v_err_arr[idx])
+
+    return {
+        "beta_best": beta_best,
+        "beta_err": beta_err,
+        "v_best": v_best,
+        "v_err": v_err,
+    }
+
+
+
+
+def _shell_midpoints_and_halfwidths_arcsec(rin_pix, rout_pix, n_shells, arcsec_per_pix):
+    edges_pix = np.linspace(float(rin_pix), float(rout_pix), int(n_shells) + 1)
+    edges_arc = edges_pix * arcsec_per_pix
+    rmid_arc = 0.5 * (edges_arc[:-1] + edges_arc[1:])
+    xerr_arc = 0.5 * (edges_arc[1:] - edges_arc[:-1])
+    return rmid_arc, xerr_arc
+
+def _escape_factor_from_eta(eta):
+    eta = np.asarray(eta, dtype=float)
+    out = np.full_like(eta, np.nan, dtype=float)
+    good = np.isfinite(eta) & (eta > 1.0)
+    out[good] = np.sqrt(2.0 * (1.0 + np.log(eta[good])))
+    return out
+
+
+
+
+def _ratio_to_escape_and_uncertainty(v_out, e_out, v_c_outer, e_c_outer, eta):
+    """
+    Compute v_out / v_esc with
+        v_esc = sqrt[2 * v_c_outer^2 * (1 + ln(eta))]
+              = f_eta * v_c_outer
+
+    Parameters
+    ----------
+    v_out, e_out : array-like
+        Outflow velocity and uncertainty per shell.
+    v_c_outer, e_c_outer : float
+        Representative outer circular velocity and its uncertainty.
+    eta : float or array-like
+        r_max / r ratio. Can be scalar (e.g. 10, 30, 100) or one value per shell.
+
+    Returns
+    -------
+    ratio, ratio_err, v_esc
+    """
+    v_out = np.asarray(v_out, dtype=float)
+    e_out = np.asarray(e_out, dtype=float)
+    eta = np.asarray(eta, dtype=float)
+
+    if eta.ndim == 0:
+        eta = np.full_like(v_out, float(eta), dtype=float)
+
+    f_eta = _escape_factor_from_eta(eta)
+    v_esc = f_eta * float(v_c_outer)
+    e_esc = f_eta * float(e_c_outer)
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ratio = v_out / v_esc
+
+        frac_out = np.divide(
+            e_out, v_out,
+            out=np.full_like(e_out, np.nan, dtype=float),
+            where=np.isfinite(v_out) & (v_out != 0)
+        )
+        frac_esc = np.divide(
+            e_esc, v_esc,
+            out=np.full_like(v_esc, np.nan, dtype=float),
+            where=np.isfinite(v_esc) & (v_esc != 0)
+        )
+
+        ratio_err = np.abs(ratio) * np.sqrt(frac_out**2 + frac_esc**2)
+
+    bad = (~np.isfinite(ratio)) | (~np.isfinite(ratio_err)) | (~np.isfinite(v_esc))
+    ratio[bad] = np.nan
+    ratio_err[bad] = np.nan
+    v_esc[bad] = np.nan
+
+    return ratio, ratio_err, v_esc
+
+
+
+
+def _extract_radial_profile(best_profile, rin_pix, rout_pix, n_shells, arcsec_per_pix):
+    if best_profile is None:
+        return None
+
+    v = np.asarray(best_profile.get("v", []), dtype=float)
+    if v.size == 0:
+        return None
+
+    v_err = np.asarray(best_profile.get("v_err", np.full_like(v, np.nan)), dtype=float)
+
+    rmid_arc, xerr_arc = _shell_midpoints_and_halfwidths_arcsec(
+        rin_pix=rin_pix,
+        rout_pix=rout_pix,
+        n_shells=n_shells,
+        arcsec_per_pix=arcsec_per_pix,
+    )
+
+    n = min(len(rmid_arc), len(v), len(v_err), len(xerr_arc))
+
+    return {
+        "r_arcsec": rmid_arc[:n],
+        "xerr_arcsec": xerr_arc[:n],
+        "v": v[:n],
+        "v_err": v_err[:n],
+    }
+
+
+
+
+def _disc_profile_from_physical_mode(
+    *,
+    fit_mode,
+    best_param,
+    best_param_err,
+    n_shells,
+    rin_pix,
+    rout_pix,
+    arcsec_per_pix,
+    scale_kpc_per_arcsec,
+    R_nsc_pc=None,
+    a_plu_pc=None,
+):
+    r_arcsec, xerr_arcsec = _shell_midpoints_and_halfwidths_arcsec(
+        rin_pix=rin_pix,
+        rout_pix=rout_pix,
+        n_shells=n_shells,
+        arcsec_per_pix=arcsec_per_pix,
+    )
+
+    fit_mode = str(fit_mode)
+
+    if fit_mode == "disk_kepler":
+        v = vkep_astropy(r_arcsec, None, None, [best_param, scale_kpc_per_arcsec])
+
+        if np.isfinite(best_param_err) and best_param > 0:
+            v_hi = vkep_astropy(r_arcsec, None, None, [best_param + best_param_err, scale_kpc_per_arcsec])
+            v_lo = vkep_astropy(r_arcsec, None, None, [max(best_param - best_param_err, 1e-12), scale_kpc_per_arcsec])
+            v_err = 0.5 * np.abs(v_hi - v_lo)
+        else:
+            v_err = np.full_like(v, np.nan)
+
+    elif fit_mode == "NSC":
+        if R_nsc_pc is None:
+            raise ValueError("R_nsc_pc is required for NSC mode.")
+        v = vnsc_astropy(r_arcsec, None, None, [best_param, scale_kpc_per_arcsec, R_nsc_pc])
+
+        if np.isfinite(best_param_err) and best_param > 0:
+            v_hi = vnsc_astropy(r_arcsec, None, None, [best_param + best_param_err, scale_kpc_per_arcsec, R_nsc_pc])
+            v_lo = vnsc_astropy(r_arcsec, None, None, [max(best_param - best_param_err, 1e-12), scale_kpc_per_arcsec, R_nsc_pc])
+            v_err = 0.5 * np.abs(v_hi - v_lo)
+        else:
+            v_err = np.full_like(v, np.nan)
+
+    elif fit_mode == "Plummer":
+        if a_plu_pc is None:
+            raise ValueError("a_plu_pc is required for Plummer mode.")
+        v = vplummer_astropy(r_arcsec, None, None, [best_param, scale_kpc_per_arcsec, a_plu_pc])
+
+        if np.isfinite(best_param_err) and best_param > 0:
+            v_hi = vplummer_astropy(r_arcsec, None, None, [best_param + best_param_err, scale_kpc_per_arcsec, a_plu_pc])
+            v_lo = vplummer_astropy(r_arcsec, None, None, [max(best_param - best_param_err, 1e-12), scale_kpc_per_arcsec, a_plu_pc])
+            v_err = 0.5 * np.abs(v_hi - v_lo)
+        else:
+            v_err = np.full_like(v, np.nan)
+
+    else:
+        raise ValueError(f"Unsupported physical disc mode: {fit_mode}")
+
+    return {
+        "r_arcsec": r_arcsec,
+        "xerr_arcsec": xerr_arcsec,
+        "v": np.asarray(v, float),
+        "v_err": np.asarray(v_err, float),
+    }
+
+
+
+
+
+def _is_rotation_curve_still_rising(disc_prof, outer_fraction=0.3):
+    r = np.asarray(disc_prof["r_arcsec"], dtype=float)
+    v = np.asarray(disc_prof["v"], dtype=float)
+    good = np.isfinite(r) & np.isfinite(v)
+    if np.sum(good) < 3:
+        return None
+
+    r = r[good]
+    v = np.abs(v[good])
+
+    order = np.argsort(r)
+    r = r[order]
+    v = v[order]
+
+    n = len(r)
+    n_outer = max(2, int(np.ceil(outer_fraction * n)))
+    idx = np.arange(n - n_outer, n)
+
+    rr = r[idx]
+    vv = v[idx]
+
+    if len(rr) < 2:
+        return None
+
+    slope = np.polyfit(rr, vv, 1)[0]
+    return slope > 0
+
+
+
+
+
+
+
+def _estimate_outer_vcirc(
+    disc_prof,
+    method="flat_plateau",
+    outer_fraction=0.3,
+    min_outer_points=2,
+    flat_slope_frac=0.08,
+    min_flat_points=3,
+):
+    """
+    Estimate a representative outer circular velocity from the disc profile.
+
+    Parameters
+    ----------
+    disc_prof : dict
+        Must contain keys 'r_arcsec', 'v', 'v_err'.
+
+    method : str
+        Supported:
+        - 'flat_plateau' : preferred; find approximately flat part of the curve
+        - 'median_outer' : old behavior, median of outermost points
+        - 'max_smooth'   : maximum of lightly smoothed profile
+
+    outer_fraction : float
+        Used only by fallback methods.
+
+    min_outer_points : int
+        Minimum number of points in outer methods.
+
+    flat_slope_frac : float
+        Threshold for "flatness", expressed as:
+            |dv/dr| < flat_slope_frac * vmax / rmax
+        Smaller = stricter flatness criterion.
+
+    min_flat_points : int
+        Minimum number of consecutive flat points required.
+
+    Returns
+    -------
+    v_c_outer, v_c_outer_err, meta
+    """
+    r = np.asarray(disc_prof["r_arcsec"], dtype=float)
+    v = np.asarray(disc_prof["v"], dtype=float)
+    e = np.asarray(disc_prof["v_err"], dtype=float)
+
+    good = np.isfinite(r) & np.isfinite(v)
+    if np.sum(good) == 0:
+        return np.nan, np.nan, {"method": method, "n_used": 0}
+
+    r = r[good]
+    v = np.abs(v[good])
+    e = e[good] if e.shape == good.shape else np.full_like(v, np.nan, dtype=float)
+
+    order = np.argsort(r)
+    r = r[order]
+    v = v[order]
+    e = e[order]
+
+    n = len(r)
+
+    # --------------------------------------------------
+    # Preferred method: find an approximately flat plateau
+    # --------------------------------------------------
+    if method == "flat_plateau":
+        if n < 5:
+            # too few points -> fallback
+            return _estimate_outer_vcirc(
+                disc_prof,
+                method="median_outer",
+                outer_fraction=outer_fraction,
+                min_outer_points=min_outer_points,
+            )
+
+        # light smoothing
+        kernel = np.array([0.25, 0.5, 0.25])
+        v_pad = np.pad(v, (1, 1), mode="edge")
+        v_smooth = np.convolve(v_pad, kernel, mode="valid")
+
+        # local slope dv/dr
+        dvdr = np.gradient(v_smooth, r)
+
+        rmax = np.nanmax(r)
+
+        # robust velocity scale: avoid being dominated by the noisy outer peak
+        vmax_ref = np.nanpercentile(v_smooth, 70)
+
+        if not np.isfinite(vmax_ref) or not np.isfinite(rmax) or rmax <= 0:
+            return np.nan, np.nan, {"method": method, "n_used": 0}
+
+        slope_thr = flat_slope_frac * vmax_ref / rmax
+
+        # candidate flat points:
+        #   small slope
+        #   reasonably high velocity, but relative to a robust scale
+        flat_mask = (np.abs(dvdr) <= slope_thr) & (v_smooth >= 0.80 * vmax_ref)
+
+
+
+        logger.info(
+            "flat_plateau candidates: %d / %d points (vmax_ref=%.2f)",
+            int(np.sum(flat_mask)), len(flat_mask), vmax_ref
+        )
+
+        # search for consecutive flat segments
+        idx = np.where(flat_mask)[0]
+
+        if idx.size > 0:
+            splits = np.where(np.diff(idx) > 1)[0] + 1
+            groups = np.split(idx, splits)
+
+            # keep only long enough groups
+            groups = [g for g in groups if len(g) >= min_flat_points]
+
+            if len(groups) > 0:
+                # choose the longest flat group; if tie, prefer the one with lower scatter
+                # and smaller radius (earlier plateau rather than noisy outer tail)
+                gbest = sorted(
+                    groups,
+                    key=lambda g: (-len(g), np.nanstd(v[g]) if len(g) > 1 else np.inf, np.nanmedian(r[g]))
+                )[0]
+
+                v_outer = float(np.nanmedian(v[gbest]))
+
+                if np.all(~np.isfinite(e[gbest])):
+                    v_outer_err = np.nanstd(v[gbest], ddof=1) if len(gbest) > 1 else np.nan
+                else:
+                    finite_e = e[gbest][np.isfinite(e[gbest])]
+                    scatter = np.nanstd(v[gbest], ddof=1) if len(gbest) > 1 else 0.0
+                    if finite_e.size > 0:
+                        v_outer_err = float(np.sqrt(np.nanmedian(finite_e**2) + scatter**2))
+                    else:
+                        v_outer_err = scatter if len(gbest) > 1 else np.nan
+
+                return v_outer, v_outer_err, {
+                    "method": "flat_plateau",
+                    "n_used": int(len(gbest)),
+                    "r_min_used_arcsec": float(r[gbest[0]]),
+                    "r_max_used_arcsec": float(r[gbest[-1]]),
+                    "slope_threshold": float(slope_thr),
+                }
+
+
+        logger.info(
+            "flat_plateau found no valid plateau: vmax_ref=%.2f, rmax=%.2f, slope_thr=%.4f",
+            vmax_ref, rmax, slope_thr
+        )
+
+        # fallback if no plateau found
+        return _estimate_outer_vcirc(
+            disc_prof,
+            method="median_outer",
+            outer_fraction=outer_fraction,
+            min_outer_points=min_outer_points,
+        )
+
+    # --------------------------------------------------
+    # Old method: median of outermost points
+    # --------------------------------------------------
+    elif method == "median_outer":
+        n_outer = max(min_outer_points, int(np.ceil(outer_fraction * n)))
+        n_outer = min(n_outer, n)
+        idx = np.arange(n - n_outer, n)
+
+        v_outer = np.nanmedian(v[idx])
+
+        if np.all(~np.isfinite(e[idx])):
+            v_outer_err = np.nanstd(v[idx], ddof=1) if n_outer > 1 else np.nan
+        else:
+            finite_e = e[idx][np.isfinite(e[idx])]
+            scatter = np.nanstd(v[idx], ddof=1) if n_outer > 1 else 0.0
+            if finite_e.size > 0:
+                v_outer_err = np.sqrt(np.nanmedian(finite_e**2) + scatter**2)
+            else:
+                v_outer_err = scatter if n_outer > 1 else np.nan
+
+        return v_outer, v_outer_err, {
+            "method": "median_outer",
+            "n_used": int(n_outer),
+            "r_min_used_arcsec": float(r[idx[0]]),
+            "r_max_used_arcsec": float(r[idx[-1]]),
+        }
+
+    # --------------------------------------------------
+    # Max of smoothed curve
+    # --------------------------------------------------
+    elif method == "max_smooth":
+        if n == 1:
+            return float(v[0]), float(e[0]) if np.isfinite(e[0]) else np.nan, {
+                "method": "max_smooth",
+                "n_used": 1,
+                "r_min_used_arcsec": float(r[0]),
+                "r_max_used_arcsec": float(r[0]),
+            }
+
+        kernel = np.array([0.25, 0.5, 0.25])
+        v_pad = np.pad(v, (1, 1), mode="edge")
+        v_smooth = np.convolve(v_pad, kernel, mode="valid")
+        i = int(np.nanargmax(v_smooth))
+
+        v_outer = float(v_smooth[i])
+        v_outer_err = float(e[i]) if np.isfinite(e[i]) else np.nan
+
+        return v_outer, v_outer_err, {
+            "method": "max_smooth",
+            "n_used": 1,
+            "r_min_used_arcsec": float(r[i]),
+            "r_max_used_arcsec": float(r[i]),
+        }
+
+    else:
+        raise ValueError(f"Unsupported method for outer vcirc estimation: {method}")
+
+
+
+
+
+
+def _make_map_header_from_obs(obs, bunit=""):
+    hdr = fits.Header()
+
+    crpix = obs.cube.get("crpix", None)
+    crval = obs.cube.get("crval", None)
+    cdelt = obs.cube.get("cdelt", None)
+
+    hdr["NAXIS"] = 2
+    hdr["CTYPE1"] = "XOFFSET"
+    hdr["CTYPE2"] = "YOFFSET"
+
+    if crpix is not None and crval is not None and cdelt is not None:
+        hdr["CRPIX1"] = float(crpix[2])
+        hdr["CRPIX2"] = float(crpix[1])
+
+        hdr["CRVAL1"] = float(crval[2])
+        hdr["CRVAL2"] = float(crval[1])
+
+        hdr["CDELT1"] = float(cdelt[2])
+        hdr["CDELT2"] = float(cdelt[1])
+
+    hdr["CUNIT1"] = "arcsec"
+    hdr["CUNIT2"] = "arcsec"
+
+    if bunit:
+        hdr["BUNIT"] = bunit
+
+    return hdr
+
+
+
+
+def _make_cube_header_from_obs(obs):
+    hdr = fits.Header()
+
+    crpix = obs.cube.get("crpix", None)
+    crval = obs.cube.get("crval", None)
+    cdelt = obs.cube.get("cdelt", None)
+
+    hdr["NAXIS"] = 3
+
+    # FITS axis order is opposite to NumPy array order.
+    # If data shape is (spec, y, x), then:
+    #   FITS axis 1 -> x
+    #   FITS axis 2 -> y
+    #   FITS axis 3 -> spectral
+
+    hdr["CTYPE1"] = "XOFFSET"
+    hdr["CTYPE2"] = "YOFFSET"
+    hdr["CTYPE3"] = "VELO-LSR"
+
+    if crpix is not None and crval is not None and cdelt is not None:
+        hdr["CRPIX1"] = float(crpix[2])
+        hdr["CRPIX2"] = float(crpix[1])
+        hdr["CRPIX3"] = float(crpix[0])
+
+        hdr["CRVAL1"] = float(crval[2])
+        hdr["CRVAL2"] = float(crval[1])
+        hdr["CRVAL3"] = float(crval[0])
+
+        hdr["CDELT1"] = float(cdelt[2])
+        hdr["CDELT2"] = float(cdelt[1])
+        hdr["CDELT3"] = float(cdelt[0])
+
+    hdr["CUNIT1"] = "arcsec"
+    hdr["CUNIT2"] = "arcsec"
+    hdr["CUNIT3"] = "km/s"
+
+    return hdr
+
+
+
+
+
+
+def _save_escape_fraction_table_fits(profiles_dict, output_path: Path):
+    hdus = [fits.PrimaryHDU()]
+
+    for extname, prof in profiles_dict.items():
+        if prof is None:
+            continue
+
+        cols = [
+            fits.Column(name="R_ARCSEC", format="E", array=np.asarray(prof["r_arcsec"], dtype=np.float32)),
+            fits.Column(name="XERR_ARCSEC", format="E", array=np.asarray(prof["xerr_arcsec"], dtype=np.float32)),
+            fits.Column(name="RATIO", format="E", array=np.asarray(prof["ratio"], dtype=np.float32)),
+            fits.Column(name="RATIO_ERR", format="E", array=np.asarray(prof["ratio_err"], dtype=np.float32)),
+        ]
+
+        if "v_esc" in prof:
+            cols.append(
+                fits.Column(name="V_ESC_KMS", format="E", array=np.asarray(prof["v_esc"], dtype=np.float32))
+            )
+
+        if "eta" in prof:
+            cols.append(
+                fits.Column(name="ETA", format="E", array=np.asarray(prof["eta"], dtype=np.float32))
+            )
+
+        if "ratio_loweta" in prof:
+            cols.append(
+                fits.Column(name="RATIO_ETA10", format="E", array=np.asarray(prof["ratio_loweta"], dtype=np.float32))
+            )
+
+        if "ratio_higheta" in prof:
+            cols.append(
+                fits.Column(name="RATIO_ETA100", format="E", array=np.asarray(prof["ratio_higheta"], dtype=np.float32))
+            )
+
+        hdus.append(fits.BinTableHDU.from_columns(cols, name=extname))
+
+    fits.HDUList(hdus).writeto(output_path, overwrite=True)
+
+
+def _save_model_cube_fits(model, obs, output_path: Path):
+    hdr = _make_cube_header_from_obs(obs)
+    data = np.asarray(model.cube["data"], dtype=np.float32)
+
+    hdu = fits.PrimaryHDU(data=data, header=hdr)
+    hdu.writeto(output_path, overwrite=True)
+
+
+
+
+
+def _save_moment_maps_fits(obs, model, output_path: Path):
+    flux_data = np.asarray(obs.maps["flux"], dtype=np.float32)
+    vel_data = np.asarray(obs.maps["vel"], dtype=np.float32)
+    sig_data = np.asarray(obs.maps["sig"], dtype=np.float32)
+
+    flux_model = np.asarray(model.maps["flux"], dtype=np.float32)
+    vel_model = np.asarray(model.maps["vel"], dtype=np.float32)
+    sig_model = np.asarray(model.maps["sig"], dtype=np.float32)
+
+    flux_resid = flux_data - flux_model
+    vel_resid = vel_data - vel_model
+    sig_resid = sig_data - sig_model
+
+    hdul = fits.HDUList([
+        fits.PrimaryHDU(),
+        fits.ImageHDU(flux_data,  header=_make_map_header_from_obs(obs, bunit="flux"), name="FLUX_DATA"),
+        fits.ImageHDU(vel_data,   header=_make_map_header_from_obs(obs, bunit="km/s"), name="VEL_DATA"),
+        fits.ImageHDU(sig_data,   header=_make_map_header_from_obs(obs, bunit="km/s"), name="SIG_DATA"),
+
+        fits.ImageHDU(flux_model, header=_make_map_header_from_obs(obs, bunit="flux"), name="FLUX_MODEL"),
+        fits.ImageHDU(vel_model,  header=_make_map_header_from_obs(obs, bunit="km/s"), name="VEL_MODEL"),
+        fits.ImageHDU(sig_model,  header=_make_map_header_from_obs(obs, bunit="km/s"), name="SIG_MODEL"),
+
+        fits.ImageHDU(flux_resid, header=_make_map_header_from_obs(obs, bunit="flux"), name="FLUX_RESID"),
+        fits.ImageHDU(vel_resid,  header=_make_map_header_from_obs(obs, bunit="km/s"), name="VEL_RESID"),
+        fits.ImageHDU(sig_resid,  header=_make_map_header_from_obs(obs, bunit="km/s"), name="SIG_RESID"),
+    ])
+
+    hdul.writeto(output_path, overwrite=True)
 
 
 

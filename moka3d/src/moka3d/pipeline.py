@@ -14,6 +14,7 @@ import json
 import logging
 import shutil
 import warnings
+import copy
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -33,6 +34,22 @@ logger = logging.getLogger(__name__)
 
 
             
+class ColorFormatter(logging.Formatter):
+    COLORS = {
+        "DEBUG": "\033[36m",      # cyan
+        "INFO": "\033[0m",        # normal
+        "WARNING": "\033[33m",    # yellow
+        "ERROR": "\033[31m",      # red
+        "CRITICAL": "\033[1;31m", # bright red
+    }
+
+    RESET = "\033[0m"
+
+    def format(self, record):
+        color = self.COLORS.get(record.levelname, self.RESET)
+        record.levelname = f"{color}{record.levelname}{self.RESET}"
+        return super().format(record)
+
 def _setup_logging(output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     log_file = output_dir / "moka3d.log"
@@ -41,14 +58,15 @@ def _setup_logging(output_dir: Path) -> None:
     logger.handlers.clear()
     logger.propagate = False
 
-    formatter = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
+    formatter_file = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
+    formatter_console = ColorFormatter("%(asctime)s | %(levelname)s | %(message)s")
 
     fh = logging.FileHandler(log_file, mode="w")
-    fh.setFormatter(formatter)
+    fh.setFormatter(formatter_file)
     logger.addHandler(fh)
 
     sh = logging.StreamHandler()
-    sh.setFormatter(formatter)
+    sh.setFormatter(formatter_console)
     logger.addHandler(sh)
 
 
@@ -65,13 +83,14 @@ def _disc_zeta_range(cfg):
 def _ask_user_to_continue_after_mask_check(output_path: Path) -> None:
     print(f"\nMasking preview saved to:\n{output_path}")
     print("Check the masking figure.")
-    answer = input("Continue with this masking? [y/N]: ").strip().lower()
+    answer = input("Continue with this masking? [y/n]: ").strip().lower()
 
-    if answer not in {"y", "yes"}:
+    if answer not in {"y", "yes", "Y"}:
         raise RuntimeError(
             "Run stopped by user after masking check. "
             "Edit the YAML file and run again."
         )
+
 
 def _plot_mask_preview(
     obs,
@@ -80,13 +99,32 @@ def _plot_mask_preview(
     mask_bicone,
     output_dir: Path,
     show_plots: bool,
-    xy_AGN,
+    agn_xy_pix,
+    arcsec_per_pix,
     xrange,
     yrange,
 ):
     fig, axes = plt.subplots(1, 3, figsize=(15, 5), dpi=200)
 
     flux = np.array(obs.maps["flux"], copy=True)
+    flux_plot = np.log10(flux)
+
+    ny, nx = flux.shape
+    x0, y0 = agn_xy_pix
+
+    # pixel-center coordinates in arcsec, with AGN at (0,0)
+    x_arc = (np.arange(nx) - x0) * arcsec_per_pix
+    y_arc = (np.arange(ny) - y0) * arcsec_per_pix
+
+    # extent for imshow
+    extent = [
+        x_arc[0] - 0.5 * arcsec_per_pix,
+        x_arc[-1] + 0.5 * arcsec_per_pix,
+        y_arc[0] - 0.5 * arcsec_per_pix,
+        y_arc[-1] + 0.5 * arcsec_per_pix,
+    ]
+
+    X_arc, Y_arc = np.meshgrid(x_arc, y_arc)
 
     panels = [
         ("Outflow mask (+)", mask_cone_pos),
@@ -95,11 +133,29 @@ def _plot_mask_preview(
     ]
 
     for ax, (title, mask) in zip(axes, panels):
-        ax.imshow(np.log10(flux), origin="lower")
-        ax.contour(mask.astype(float), levels=[0.5], linewidths=2)
+        ax.imshow(flux_plot, origin="lower", extent=extent, cmap = 'inferno')
+        ax.contour(X_arc, Y_arc, mask.astype(float), levels=[0.5], linewidths=2)
+
+        # AGN at (0,0)
+        ax.plot(
+            0.0, 0.0,
+            marker="*",
+            markersize=16,
+            markerfacecolor="yellow",
+            markeredgecolor="black",
+            markeredgewidth=1.0,
+            linestyle="None",
+            zorder=10,
+        )
+
         ax.set_title(title)
-        ax.set_xlabel("x [pix]")
-        ax.set_ylabel("y [pix]")
+        ax.set_xlabel(r'$\Delta$ RA ["]')
+        ax.set_ylabel(r'$\Delta$ Dec ["]')
+
+        if xrange is not None:
+            ax.set_xlim(xrange)
+        if yrange is not None:
+            ax.set_ylim(yrange)
 
     plt.tight_layout()
     outpath = output_dir / "02a_mask_preview.png"
@@ -109,191 +165,10 @@ def _plot_mask_preview(
 
 
 
-def _extract_best_fit_with_uncertainties(fit: dict | None) -> dict | None:
-    """
-    Extract best-fit beta/v and approximate uncertainties from the fit dictionary.
-
-    Returns a dict with:
-        beta_best, beta_err, v_best, v_err
-    or None if fit is None.
-    """
-    if fit is None:
-        return None
-
-    beta_best = float(fit.get("beta_best", np.nan))
-    v_best = float(fit.get("v_best", np.nan))
-
-    beta_err = np.nan
-    v_err = np.nan
-
-    best = fit.get("best", None)
-    if isinstance(best, dict):
-        beta_err = float(best.get("beta_err_scalar", np.nan))
-
-        v_arr = np.asarray(best.get("v", []), dtype=float)
-        v_err_arr = np.asarray(best.get("v_err", []), dtype=float)
-
-        if v_arr.size > 0 and v_err_arr.size > 0:
-            idx = int(np.nanargmin(np.abs(v_arr - v_best)))
-            if idx < v_err_arr.size:
-                v_err = float(v_err_arr[idx])
-
-    return {
-        "beta_best": beta_best,
-        "beta_err": beta_err,
-        "v_best": v_best,
-        "v_err": v_err,
-    }
 
 
 
 
-
-def _make_map_header_from_obs(obs, bunit=""):
-    hdr = fits.Header()
-
-    crpix = obs.cube.get("crpix", None)
-    crval = obs.cube.get("crval", None)
-    cdelt = obs.cube.get("cdelt", None)
-
-    hdr["NAXIS"] = 2
-    hdr["CTYPE1"] = "XOFFSET"
-    hdr["CTYPE2"] = "YOFFSET"
-
-    if crpix is not None and crval is not None and cdelt is not None:
-        hdr["CRPIX1"] = float(crpix[2])
-        hdr["CRPIX2"] = float(crpix[1])
-
-        hdr["CRVAL1"] = float(crval[2])
-        hdr["CRVAL2"] = float(crval[1])
-
-        hdr["CDELT1"] = float(cdelt[2])
-        hdr["CDELT2"] = float(cdelt[1])
-
-    hdr["CUNIT1"] = "arcsec"
-    hdr["CUNIT2"] = "arcsec"
-
-    if bunit:
-        hdr["BUNIT"] = bunit
-
-    return hdr
-
-
-
-
-def _make_cube_header_from_obs(obs):
-    hdr = fits.Header()
-
-    crpix = obs.cube.get("crpix", None)
-    crval = obs.cube.get("crval", None)
-    cdelt = obs.cube.get("cdelt", None)
-
-    hdr["NAXIS"] = 3
-
-    # FITS axis order is opposite to NumPy array order.
-    # If data shape is (spec, y, x), then:
-    #   FITS axis 1 -> x
-    #   FITS axis 2 -> y
-    #   FITS axis 3 -> spectral
-
-    hdr["CTYPE1"] = "XOFFSET"
-    hdr["CTYPE2"] = "YOFFSET"
-    hdr["CTYPE3"] = "VELO-LSR"
-
-    if crpix is not None and crval is not None and cdelt is not None:
-        hdr["CRPIX1"] = float(crpix[2])
-        hdr["CRPIX2"] = float(crpix[1])
-        hdr["CRPIX3"] = float(crpix[0])
-
-        hdr["CRVAL1"] = float(crval[2])
-        hdr["CRVAL2"] = float(crval[1])
-        hdr["CRVAL3"] = float(crval[0])
-
-        hdr["CDELT1"] = float(cdelt[2])
-        hdr["CDELT2"] = float(cdelt[1])
-        hdr["CDELT3"] = float(cdelt[0])
-
-    hdr["CUNIT1"] = "arcsec"
-    hdr["CUNIT2"] = "arcsec"
-    hdr["CUNIT3"] = "km/s"
-
-    return hdr
-
-def _shell_midpoints_and_halfwidths_arcsec(rin_pix, rout_pix, n_shells, arcsec_per_pix):
-    edges_pix = np.linspace(float(rin_pix), float(rout_pix), int(n_shells) + 1)
-    edges_arc = edges_pix * arcsec_per_pix
-    rmid_arc = 0.5 * (edges_arc[:-1] + edges_arc[1:])
-    xerr_arc = 0.5 * (edges_arc[1:] - edges_arc[:-1])
-    return rmid_arc, xerr_arc
-
-def _interp_with_nan(x_new, x_old, y_old):
-    x_old = np.asarray(x_old, dtype=float)
-    y_old = np.asarray(y_old, dtype=float)
-    x_new = np.asarray(x_new, dtype=float)
-
-    good = np.isfinite(x_old) & np.isfinite(y_old)
-    if np.sum(good) < 2:
-        return np.full_like(x_new, np.nan, dtype=float)
-
-    return np.interp(x_new, x_old[good], y_old[good], left=np.nan, right=np.nan)
-
-
-def _ratio_and_uncertainty(v_out, e_out, v_disc, e_disc):
-    v_out = np.asarray(v_out, dtype=float)
-    e_out = np.asarray(e_out, dtype=float)
-    v_disc = np.asarray(v_disc, dtype=float)
-    e_disc = np.asarray(e_disc, dtype=float)
-
-    denom = 3.0 * v_disc
-
-    with np.errstate(divide="ignore", invalid="ignore"):
-        ratio = v_out / denom
-
-        frac_out = np.divide(
-            e_out, v_out,
-            out=np.full_like(e_out, np.nan, dtype=float),
-            where=np.isfinite(v_out) & (v_out != 0)
-        )
-        frac_disc = np.divide(
-            e_disc, v_disc,
-            out=np.full_like(e_disc, np.nan, dtype=float),
-            where=np.isfinite(v_disc) & (v_disc != 0)
-        )
-
-        ratio_err = np.abs(ratio) * np.sqrt(frac_out**2 + frac_disc**2)
-
-    bad = (~np.isfinite(ratio)) | (~np.isfinite(ratio_err))
-    ratio[bad] = np.nan
-    ratio_err[bad] = np.nan
-
-    return ratio, ratio_err
-
-
-def _extract_radial_profile(best_profile, rin_pix, rout_pix, n_shells, arcsec_per_pix):
-    if best_profile is None:
-        return None
-
-    v = np.asarray(best_profile.get("v", []), dtype=float)
-    if v.size == 0:
-        return None
-
-    v_err = np.asarray(best_profile.get("v_err", np.full_like(v, np.nan)), dtype=float)
-
-    rmid_arc, xerr_arc = _shell_midpoints_and_halfwidths_arcsec(
-        rin_pix=rin_pix,
-        rout_pix=rout_pix,
-        n_shells=n_shells,
-        arcsec_per_pix=arcsec_per_pix,
-    )
-
-    n = min(len(rmid_arc), len(v), len(v_err), len(xerr_arc))
-
-    return {
-        "r_arcsec": rmid_arc[:n],
-        "xerr_arcsec": xerr_arc[:n],
-        "v": v[:n],
-        "v_err": v_err[:n],
-    }
 
 
 def _plot_escape_fraction_profile(
@@ -318,28 +193,51 @@ def _plot_escape_fraction_profile(
     def _draw_one(profile, label):
         if profile is None:
             return
-        r = profile["r_arcsec"]
-        xerr = profile["xerr_arcsec"]
-        y = profile["ratio"]
-        yerr = profile["ratio_err"]
+
+        r = np.asarray(profile["r_arcsec"], dtype=float)
+        xerr = np.asarray(profile["xerr_arcsec"], dtype=float)
+        y = np.asarray(profile["ratio"], dtype=float)
+        yerr = np.asarray(profile["ratio_err"], dtype=float)
 
         good = np.isfinite(r) & np.isfinite(y)
         if not np.any(good):
             return
 
+        # --- systematic halo-size band: eta=10 to eta=100
+        if ("ratio_loweta" in profile) and ("ratio_higheta" in profile):
+            y_eta_low = np.asarray(profile["ratio_loweta"], dtype=float)
+            y_eta_high = np.asarray(profile["ratio_higheta"], dtype=float)
+
+            y_sys_lo = np.minimum(y_eta_low, y_eta_high)
+            y_sys_hi = np.maximum(y_eta_low, y_eta_high)
+
+            ok_sys = good & np.isfinite(y_sys_lo) & np.isfinite(y_sys_hi)
+            if np.any(ok_sys):
+                ax.fill_between(
+                    r[ok_sys],
+                    y_sys_lo[ok_sys],
+                    y_sys_hi[ok_sys],
+                    alpha=0.15,
+                    #label=f"{label} halo range",
+                )
+
+        # --- statistical uncertainty band around fiducial eta=30
+        #ylo = y - yerr
+        #yhi = y + yerr
+        #ok_stat = good & np.isfinite(ylo) & np.isfinite(yhi)
+        #if np.any(ok_stat):
+        #    ax.fill_between(r[ok_stat], ylo[ok_stat], yhi[ok_stat], alpha=0.25)
+
+        # --- fiducial eta=30 points/line
         ax.errorbar(
             r[good], y[good],
             xerr=xerr[good],
+            #yerr=yerr[good],
             fmt="o-",
             lw=1.5,
             capsize=4,
             label=label,
         )
-        ylo = y - yerr
-        yhi = y + yerr
-        ok_band = good & np.isfinite(ylo) & np.isfinite(yhi)
-        if np.any(ok_band):
-            ax.fill_between(r[ok_band], ylo[ok_band], yhi[ok_band], alpha=0.2)
 
     _draw_one(out_pos_profile, "Outflow (+)")
     _draw_one(out_neg_profile, "Outflow (-)")
@@ -349,23 +247,23 @@ def _plot_escape_fraction_profile(
     ax.set_xlabel(r"Radius [arcsec]", fontsize=14)
     ax.set_ylabel(r"$v_{\rm out}/(v_{\rm esc})$", fontsize=14)
     ax.grid(alpha=0.2)
-    ax.legend(fontsize=12, loc="best")
+    ax.legend(fontsize=11, loc="best")
 
     rmax_arc = float(max(radius_range_model_disc[1], radius_range_model_out[1]))
     xmin, xmax = 0.0, rmax_arc
     pad = 0.02 * (xmax - xmin) if xmax > xmin else 0.1
     ax.set_xlim(max(0.0, xmin), xmax + pad)
 
-    ax_top = ax.twiny()
-    ax_top.tick_params(axis="both", labelsize=12)
-    ax_top.set_xlim(ax.get_xlim())
-    tick_arc = ax.get_xticks()
-    tick_arc = tick_arc[tick_arc >= 0]
-    ax.set_xticks(tick_arc)
-    ax_top.set_xticks(tick_arc)
-    tick_show = tick_arc * scale_kpc_per_arcsec
-    ax_top.set_xticklabels([f"{round(t,1):.1f}" for t in tick_show])
-    ax_top.set_xlabel("Radius [kpc]", fontsize=14)
+    def a2k(x):
+        return x * float(scale_kpc_per_arcsec)
+
+    def k2a(x):
+        return x / float(scale_kpc_per_arcsec)
+
+    secax = ax.secondary_xaxis("top", functions=(a2k, k2a))
+    secax.set_xlabel("Radius [kpc]", fontsize=14)
+    secax.tick_params(axis="both", labelsize=12)
+
 
     plt.tight_layout()
     finalize_figure(output_path, show=show_plots)
@@ -373,61 +271,6 @@ def _plot_escape_fraction_profile(
 
 
 
-def _save_escape_fraction_table_fits(profiles_dict, output_path: Path):
-    hdus = [fits.PrimaryHDU()]
-
-    for extname, prof in profiles_dict.items():
-        if prof is None:
-            continue
-
-        cols = [
-            fits.Column(name="R_ARCSEC", format="E", array=np.asarray(prof["r_arcsec"], dtype=np.float32)),
-            fits.Column(name="XERR_ARCSEC", format="E", array=np.asarray(prof["xerr_arcsec"], dtype=np.float32)),
-            fits.Column(name="RATIO", format="E", array=np.asarray(prof["ratio"], dtype=np.float32)),
-            fits.Column(name="RATIO_ERR", format="E", array=np.asarray(prof["ratio_err"], dtype=np.float32)),
-        ]
-        hdus.append(fits.BinTableHDU.from_columns(cols, name=extname))
-
-    fits.HDUList(hdus).writeto(output_path, overwrite=True)
-
-
-
-def _save_model_cube_fits(model, obs, output_path: Path):
-    hdr = _make_cube_header_from_obs(obs)
-    data = np.asarray(model.cube["data"], dtype=np.float32)
-
-    hdu = fits.PrimaryHDU(data=data, header=hdr)
-    hdu.writeto(output_path, overwrite=True)
-
-def _save_moment_maps_fits(obs, model, output_path: Path):
-    flux_data = np.asarray(obs.maps["flux"], dtype=np.float32)
-    vel_data = np.asarray(obs.maps["vel"], dtype=np.float32)
-    sig_data = np.asarray(obs.maps["sig"], dtype=np.float32)
-
-    flux_model = np.asarray(model.maps["flux"], dtype=np.float32)
-    vel_model = np.asarray(model.maps["vel"], dtype=np.float32)
-    sig_model = np.asarray(model.maps["sig"], dtype=np.float32)
-
-    flux_resid = flux_data - flux_model
-    vel_resid = vel_data - vel_model
-    sig_resid = sig_data - sig_model
-
-    hdul = fits.HDUList([
-        fits.PrimaryHDU(),
-        fits.ImageHDU(flux_data,  header=_make_map_header_from_obs(obs, bunit="flux"), name="FLUX_DATA"),
-        fits.ImageHDU(vel_data,   header=_make_map_header_from_obs(obs, bunit="km/s"), name="VEL_DATA"),
-        fits.ImageHDU(sig_data,   header=_make_map_header_from_obs(obs, bunit="km/s"), name="SIG_DATA"),
-
-        fits.ImageHDU(flux_model, header=_make_map_header_from_obs(obs, bunit="flux"), name="FLUX_MODEL"),
-        fits.ImageHDU(vel_model,  header=_make_map_header_from_obs(obs, bunit="km/s"), name="VEL_MODEL"),
-        fits.ImageHDU(sig_model,  header=_make_map_header_from_obs(obs, bunit="km/s"), name="SIG_MODEL"),
-
-        fits.ImageHDU(flux_resid, header=_make_map_header_from_obs(obs, bunit="flux"), name="FLUX_RESID"),
-        fits.ImageHDU(vel_resid,  header=_make_map_header_from_obs(obs, bunit="km/s"), name="VEL_RESID"),
-        fits.ImageHDU(sig_resid,  header=_make_map_header_from_obs(obs, bunit="km/s"), name="SIG_RESID"),
-    ])
-
-    hdul.writeto(output_path, overwrite=True)
 
 
 def run_pipeline(cfg, config_path: Path | None = None) -> dict:
@@ -563,6 +406,16 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         R_data_err_arcsec=R_int_err,
     )
     finalize_figure(output_dir / "03_PA_estimate.png", show=cfg.output.show_plots)
+    if (cfg.fit.component_mode == "disk") and bool(cfg.advanced.check_masking_before_fitting):
+        print(f"\nPA estimate preview saved to:\n{output_dir / '03_PA_estimate.png'}")
+        print("Check the PA estimate figure.")
+        answer = input("Continue with this PA estimate? [y/n]: ").strip().lower()
+
+        if answer not in {"y", "yes", "Y"}:
+            raise RuntimeError(
+                "Run stopped by user after PA check. "
+                "Edit the YAML file and run again."
+            )
 
 
     summary = {
@@ -611,28 +464,87 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
     
     npt = int(cfg.advanced.npt)
     
-    radius_range_model_disc = list(cfg.fit.radius_range_model_disc)
-    radius_range_model_out = list(cfg.fit.radius_range_model_out)
-    
-    num_shells_disc = int(cfg.fit.num_shells_disc)
-    num_shells_out = int(cfg.fit.num_shells_out)
-    
-    beta_min_d, beta_max_d, step_beta_d = map(float, cfg.fit.beta_grid_disc)
-    v_min_d, v_max_d, step_v_d = map(float, cfg.fit.v_grid_disc)
-    
-    OUTFLOW_PA_DEG = float(cfg.fit.outflow_pa_deg)
-    OUTFLOW_OPENING_DEG = float(cfg.fit.outflow_opening_deg)
-    OUTFLOW_DOUBLE_CONE = bool(cfg.fit.outflow_double_cone)
-    OUTFLOW_MASK_MODE = str(cfg.fit.outflow_mask_mode)
+    disc_cfg = cfg.fit.disc
+    out_cfg = cfg.fit.outflow
+
+    radius_range_model_disc = list(disc_cfg.radius_range_arcsec)
+    radius_range_model_out = list(out_cfg.radius_range_arcsec)
+
+    num_shells_disc = int(disc_cfg.num_shells)
+    num_shells_out = int(out_cfg.num_shells)
+
+    beta_min_d, beta_max_d, step_beta_d = map(float, disc_cfg.beta_grid_deg)
+    beta_min_o, beta_max_o, step_beta_o = map(float, out_cfg.beta_grid_deg)
+
+    OUTFLOW_PA_DEG = float(out_cfg.pa_deg)
+    OUTFLOW_OPENING_DEG = float(out_cfg.opening_deg)
+    OUTFLOW_DOUBLE_CONE = bool(out_cfg.double_cone)
+    OUTFLOW_MASK_MODE = str(out_cfg.mask_mode)
     OUTFLOW_AXIS_SIGN = int(cfg.advanced.outflow_axis_sign)
-    
-    beta_min_o, beta_max_o, step_beta_o = map(float, cfg.fit.beta_grid_out)
-    v_min_o, v_max_o, step_v_o = map(float, cfg.fit.v_grid_out)
+
+    v_min_o, v_max_o, step_v_o = map(float, out_cfg.v_grid_kms)
+
     
     USE_GLOBAL_BETA_DISC = bool(cfg.advanced.use_global_beta_disc)
-    DISC_FIT_MODE = str(cfg.advanced.disc_fit_mode)
+    DISC_FIT_MODE = str(cfg.fit.disc.mode)
     disc_phi_range = cfg.advanced.disc_phi_range
     disc_zeta_range = _disc_zeta_range(cfg)
+
+    DISC_IS_PHYSICAL = DISC_FIT_MODE in {"disk_kepler", "NSC", "Plummer", "disk_arctan"}
+
+    disc_mode_cfg = disc_cfg
+
+    DISC_N_GEOM_V = 50
+    DISC_R_NSC_PC = None
+    DISC_A_PLU_PC = None
+    DISC_RT_ARCSEC = None
+
+    if DISC_FIT_MODE == "independent":
+        v_min_d, v_max_d, step_v_d = map(float, disc_mode_cfg.independent.v_grid_kms)
+
+    elif DISC_FIT_MODE == "disk_kepler":
+        v_min_d, v_max_d = map(float, disc_mode_cfg.kepler.mbh_grid_msun)
+        step_v_d = 1.0
+        DISC_N_GEOM_V = int(disc_mode_cfg.kepler.n_geom)
+
+    elif DISC_FIT_MODE == "NSC":
+        v_min_d, v_max_d = map(float, disc_mode_cfg.nsc.a_grid)
+        step_v_d = 1.0
+        DISC_N_GEOM_V = int(disc_mode_cfg.nsc.n_geom)
+        DISC_R_NSC_PC = float(disc_mode_cfg.nsc.re_pc)
+
+    elif DISC_FIT_MODE == "Plummer":
+        v_min_d, v_max_d = map(float, disc_mode_cfg.plummer.m0_grid_msun)
+        step_v_d = 1.0
+        DISC_N_GEOM_V = int(disc_mode_cfg.plummer.n_geom)
+        DISC_A_PLU_PC = float(disc_mode_cfg.plummer.a_pc)
+
+    elif DISC_FIT_MODE == "disk_arctan":
+        v_min_d, v_max_d, step_v_d = map(float, disc_mode_cfg.arctan.vmax_grid_kms)
+        DISC_RT_ARCSEC = None if disc_mode_cfg.arctan.rt_arcsec is None else float(disc_mode_cfg.arctan.rt_arcsec)
+
+    else:
+        raise ValueError(f"Unsupported DISC_FIT_MODE: {DISC_FIT_MODE}")
+
+
+    if DISC_IS_PHYSICAL and not USE_GLOBAL_BETA_DISC:
+        logger.warning(
+            "DISC physical mode '%s' is not compatible with per-shell free-v summary. "
+            "Forcing USE_GLOBAL_BETA_DISC=True.",
+            DISC_FIT_MODE
+        )
+        USE_GLOBAL_BETA_DISC = True
+
+    if DISC_FIT_MODE == "NSC" and DISC_R_NSC_PC is None:
+        raise ValueError("For DISC_FIT_MODE='NSC' you must set fit.disc.nsc.re_pc.")
+
+    if DISC_FIT_MODE == "Plummer" and DISC_A_PLU_PC is None:
+        raise ValueError("For DISC_FIT_MODE='Plummer' you must set fit.disc.plummer.a_pc.")
+
+    if DISC_FIT_MODE == "disk_arctan" and DISC_RT_ARCSEC is None:
+        raise ValueError("For DISC_FIT_MODE='disk_arctan' you must set fit.disc.arctan.rt_arcsec.")
+
+
     
     USE_GLOBAL_BETA_OUT = bool(cfg.advanced.use_global_beta_out)
     
@@ -643,6 +555,10 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
 
     COMPUTE_ESCAPE_FRACTION = bool(cfg.advanced.compute_escape_fraction)
     SAVE_ESCAPE_FRACTION_TABLE = bool(cfg.advanced.save_escape_fraction_table)
+
+    ESCAPE_ETA_LOW = 10.0
+    ESCAPE_ETA_FID = 30.0
+    ESCAPE_ETA_HIGH = 100.0
     
     # Processing/runtime aliases used throughout the old script
     vel = vel_kms
@@ -666,7 +582,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
     cube_range = obs.cube["range"]
     cube_nbins = obs.cube["nbins"]
     
-    logger.info("Fit mode: %s", FIT_COMPONENT_MODE)
+    logger.info("Component mode: %s | fit mode: %s",FIT_COMPONENT_MODE,DISC_FIT_MODE)
     if FIT_COMPONENT_MODE == "disk":
         logger.info("Disc shells: %d", num_shells_disc)
 
@@ -683,7 +599,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
     # fixed standard params that could be also decided by the user even if are std
     CRPS_QGRID = np.linspace(0.01, 0.99, 19)   
     disc_geometry = "cylindrical" # disc geometry is always cylindrical
-    disc_theta_range = [[0, 1]]
+    disc_theta_range = list(cfg.advanced.disc_theta_range)
     disc_double_cone = False
     disc_aperture = disc_theta_range[0][1] * 2
     # --------------------------
@@ -699,48 +615,53 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
     # --------------------------
     # --- lobe + (axis_sign = +1)
     # --------------------------
-    # 1) Build outflow spatial masks: lobe +, lobe -, bicone (union)
+    # Build outflow spatial masks only when outflow is part of the fit
     # --------------------------
-    mask_cone_pos = km.make_cone_spatial_mask(
-        shape_yx=obs.cube["data"].shape[1:],
-        center_xy=origin,
-        pa_deg=OUTFLOW_PA_DEG,
-        opening_deg=OUTFLOW_OPENING_DEG,
-        mode="single",
-        axis_sign=+1
-    )
+    mask_cone_pos = None
+    mask_cone_neg = None
+    mask_bicone = None
 
-    mask_cone_neg = km.make_cone_spatial_mask(
-        shape_yx=obs.cube["data"].shape[1:],
-        center_xy=origin,
-        pa_deg=OUTFLOW_PA_DEG,
-        opening_deg=OUTFLOW_OPENING_DEG,
-        mode="single",
-        axis_sign=-1
-    )
-
-    mask_bicone = (mask_cone_pos | mask_cone_neg)
-
-    if bool(cfg.advanced.check_masking_before_fitting):
-        mask_preview_path = _plot_mask_preview(
-            obs=obs,
-            mask_cone_pos=mask_cone_pos,
-            mask_cone_neg=mask_cone_neg,
-            mask_bicone=mask_bicone,
-            output_dir=output_dir,
-            show_plots=cfg.output.show_plots,
-            xy_AGN= origin,
-            xrange=xrange,
-            yrange=yrange,
+    if FIT_COMPONENT_MODE in ("outflow", "disk_then_outflow"):
+        mask_cone_pos = km.make_cone_spatial_mask(
+            shape_yx=obs.cube["data"].shape[1:],
+            center_xy=origin,
+            pa_deg=OUTFLOW_PA_DEG,
+            opening_deg=OUTFLOW_OPENING_DEG,
+            mode="single",
+            axis_sign=+1
         )
-        _ask_user_to_continue_after_mask_check(mask_preview_path)
+
+        mask_cone_neg = km.make_cone_spatial_mask(
+            shape_yx=obs.cube["data"].shape[1:],
+            center_xy=origin,
+            pa_deg=OUTFLOW_PA_DEG,
+            opening_deg=OUTFLOW_OPENING_DEG,
+            mode="single",
+            axis_sign=-1
+        )
+
+        mask_bicone = (mask_cone_pos | mask_cone_neg)
+
+        if bool(cfg.advanced.check_masking_before_fitting):
+            mask_preview_path = _plot_mask_preview(
+                obs=obs,
+                mask_cone_pos=mask_cone_pos,
+                mask_cone_neg=mask_cone_neg,
+                mask_bicone=mask_bicone,
+                output_dir=output_dir,
+                show_plots=cfg.output.show_plots,
+                agn_xy_pix=origin,
+                arcsec_per_pix=arcsec_per_pix,
+                xrange=xrange,
+                yrange=yrange,
+            )
+
+            _ask_user_to_continue_after_mask_check(mask_preview_path)
 
     def _keep_only_mask(cube, keep_mask_yx, mode="nan"):
         """Keep pixels inside keep_mask_yx; mask everything else."""
         mask_outside = ~keep_mask_yx
         return km.apply_spatial_mask_to_cube(cube, mask_outside, mode=mode)
-
-
     # ========================================
     # 2) DISC FIT
     # ========================================
@@ -768,7 +689,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         obs_disc_fit.plot_kin_maps(flrange=flrange, vrange=velrange, sigrange=sigrange,
                                    xy_AGN=xy_AGN, xrange=xrange, yrange=yrange)
         finalize_figure(output_dir / "02_disc_fit_input_maps.png", show=cfg.output.show_plots)
-        if cfg.fit.disc_pa_deg is None:
+        if disc_cfg.pa_deg is None:
             gamma_disc, gamma_disc_unc = km.estimate_pa_from_mom1(
                 obs_disc_fit.maps["vel"],
                 center_xy=origin,
@@ -786,12 +707,12 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                 gamma_disc_unc,
             )
         else:
-            gamma_disc = float(cfg.fit.disc_pa_deg)
+            gamma_disc = float(disc_cfg.pa_deg)
             gamma_disc_unc = (
-                float(cfg.fit.disc_pa_unc_deg)
-                if cfg.fit.disc_pa_unc_deg is not None
+                float(disc_cfg.pa_unc_deg)
+                if disc_cfg.pa_unc_deg is not None
                 else 0.0
-            )
+                 )
             logger.info(
                 "DISC PA fixed from YAML: %.1f deg (uncertainty=%.1f deg)",
                 gamma_disc,
@@ -830,20 +751,57 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
             SIGMA_PERC_KMS=SIGMA_PERC_KMS,
             beta_min=beta_min_d, beta_max=beta_max_d, step_beta=step_beta_d,
             v_min=v_min_d, v_max=v_max_d, step_v=step_v_d,
+            R_nsc=DISC_R_NSC_PC,
+            a_plu=DISC_A_PLU_PC,
+            RT_ARCSEC=DISC_RT_ARCSEC,
+            n_geom_v=DISC_N_GEOM_V,
             verbose_label="DISC"
         )
 
-        disc_best_info = _extract_best_fit_with_uncertainties(disc_fit)
-        logger.info(
-            "DISC Global best: beta=%.1f ± %.1f deg, v=%.1f ± %.0f km/s",
-            disc_best_info["beta_best"],
-            disc_best_info["beta_err"],
-            disc_best_info["v_best"],
-            disc_best_info["v_err"],
-        )
+        disc_best_info = km._extract_best_fit_with_uncertainties(disc_fit)
+
+        disc_param_label = {
+            "disk_kepler": "M_BH",
+            "NSC": "A",
+            "Plummer": "M0",
+            "disk_arctan": "Vmax",
+        }.get(DISC_FIT_MODE, "v")
+
+        disc_param_unit = {
+            "disk_kepler": "Msun",
+            "NSC": "",
+            "Plummer": "Msun",
+            "disk_arctan": "km/s",
+        }.get(DISC_FIT_MODE, "km/s")
+
+
+        if disc_param_unit:
+            logger.info(
+                "DISC Global best: beta=%.1f ± %.1f deg, %s=%.4g ± %.4g %s",
+                disc_best_info["beta_best"],
+                disc_best_info["beta_err"],
+                disc_param_label,
+                disc_best_info["v_best"],
+                disc_best_info["v_err"],
+                disc_param_unit,
+            )
+        else:
+            logger.info(
+                "DISC Global best: beta=%.1f ± %.1f deg, %s=%.4g ± %.4g",
+                disc_best_info["beta_best"],
+                disc_best_info["beta_err"],
+                disc_param_label,
+                disc_best_info["v_best"],
+                disc_best_info["v_err"],
+            )
+
+
+
+
 
 
         num_shells_disc_eff = int(np.shape(disc_fit["chi_squared_map"])[0])
+
 
         # global chi2(beta)
         beta_best_global_disc, _, _, _ = km.plot_chi2_vs_beta_global(
@@ -858,45 +816,133 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         )
         finalize_figure(output_dir / "07_disc_global_beta_chi2.png", show=cfg.output.show_plots)
 
+        if DISC_FIT_MODE in {"disk_kepler", "NSC", "Plummer", "disk_arctan"}:
+            bestp = disc_fit.get("best", None)
+
+            param_label = {
+                "disk_kepler": r"$M_\bullet$ ($M_\odot$)",
+                "NSC": r"$A$",
+                "Plummer": r"$M_0$ ($M_\odot$)",
+                "disk_arctan": r"$V_{\max}$ (km s$^{-1}$)",
+            }[DISC_FIT_MODE]
+
+            use_logx = DISC_FIT_MODE in {"disk_kepler", "NSC", "Plummer"}
+
+            fig = km.plot_chi2_vs_param_global(
+                bestp,
+                disc_fit["v_array"],
+                title=f"DISC: global $\\chi^2$ vs {param_label}",
+                x_label=param_label,
+                logx=use_logx,
+                logy=True,
+            )
+            if fig is not None:
+                finalize_figure(output_dir / "07b_disc_global_param_chi2.png", show=cfg.output.show_plots)
+
         if USE_GLOBAL_BETA_DISC:
             disc_fit["beta_best"] = float(beta_best_global_disc)
 
         # summarize for plots + scatter
+        disc_best2_for_plots = None
+
         try:
-            if USE_GLOBAL_BETA_DISC:
-                best1 = disc_fit["best"]
-                beta_fixed = float(disc_fit["beta_best"])
-                beta_err_scalar = best1.get("beta_err_scalar", np.nan)
+            if DISC_FIT_MODE in {"disk_kepler", "NSC", "Plummer", "disk_arctan"}:
+                # physical/global disc model: build velocity profile from the best global parameter
+                best = disc_fit["best"]
 
-                disc_best2_for_plots = km.summarize_fixed_beta_per_shell_v(
-                    disc_fit["chi_squared_map"], disc_fit["beta_array"], disc_fit["v_array"],
-                    beta_fixed, beta_err_scalar=beta_err_scalar
-                )
+                if DISC_FIT_MODE == "disk_kepler":
+                    p_best = float(best["p_star"])
+                    p_err  = float(best["p_err"])
+                elif DISC_FIT_MODE == "NSC":
+                    p_best = float(best["p_star"])
+                    p_err  = float(best["p_err"])
+                elif DISC_FIT_MODE == "Plummer":
+                    p_best = float(best["p_star"])
+                    p_err  = float(best["p_err"])
+                elif DISC_FIT_MODE == "disk_arctan":
+                    p_best = float(best["p_star"])
+                    p_err  = float(best["p_err"])
+
+                if DISC_FIT_MODE == "disk_arctan":
+                    r_arcsec, xerr_arcsec = km._shell_midpoints_and_halfwidths_arcsec(
+                        rin_pix=rin_pix_disc,
+                        rout_pix=rout_pix_disc,
+                        n_shells=num_shells_disc_eff,
+                        arcsec_per_pix=arcsec_per_pix,
+                    )
+                    v = km.vrot_arctan(r_arcsec, None, None, [p_best, DISC_RT_ARCSEC])
+                    if np.isfinite(p_err):
+                        v_hi = km.vrot_arctan(r_arcsec, None, None, [p_best + p_err, DISC_RT_ARCSEC])
+                        v_lo = km.vrot_arctan(r_arcsec, None, None, [max(p_best - p_err, 1e-12), DISC_RT_ARCSEC])
+                        v_err = 0.5 * np.abs(v_hi - v_lo)
+                    else:
+                        v_err = np.full_like(v, np.nan)
+
+                    disc_best2_for_plots = {
+                        "beta": np.full(num_shells_disc_eff, float(disc_fit["beta_best"])),
+                        "beta_err": np.full(num_shells_disc_eff, best.get("beta_err", np.nan)),
+                        "v": np.asarray(v, float),
+                        "v_err": np.asarray(v_err, float),
+                    }
+                else:
+                    disc_best2_for_plots = km._disc_profile_from_physical_mode(
+                        fit_mode=DISC_FIT_MODE,
+                        best_param=p_best,
+                        best_param_err=p_err,
+                        n_shells=num_shells_disc_eff,
+                        rin_pix=rin_pix_disc,
+                        rout_pix=rout_pix_disc,
+                        arcsec_per_pix=arcsec_per_pix,
+                        scale_kpc_per_arcsec=scale,
+                        R_nsc_pc=DISC_R_NSC_PC,
+                        a_plu_pc=DISC_A_PLU_PC,
+                    )
+                    disc_best2_for_plots["beta"] = np.full(num_shells_disc_eff, float(disc_fit["beta_best"]))
+                    disc_best2_for_plots["beta_err"] = np.full(num_shells_disc_eff, best.get("beta_err", np.nan))
+
             else:
-                disc_best2_for_plots = km.summarize_free_beta_per_shell(
-                    disc_fit["chi_squared_map"], disc_fit["beta_array"], disc_fit["v_array"],
-                    delta_chi2=2.30
+                # old independent-shell behavior
+                if USE_GLOBAL_BETA_DISC:
+                    best1 = disc_fit["best"]
+                    beta_fixed = float(disc_fit["beta_best"])
+                    beta_err_scalar = best1.get("beta_err_scalar", np.nan)
+
+                    disc_best2_for_plots = km.summarize_fixed_beta_per_shell_v(
+                        disc_fit["chi_squared_map"], disc_fit["beta_array"], disc_fit["v_array"],
+                        beta_fixed, beta_err_scalar=beta_err_scalar
+                    )
+                else:
+                    disc_best2_for_plots = km.summarize_free_beta_per_shell(
+                        disc_fit["chi_squared_map"], disc_fit["beta_array"], disc_fit["v_array"],
+                        delta_chi2=2.30
+                    )
+
+                _ = km.percentile_scatter_per_shell_best(
+                    best=disc_best2_for_plots, obs=obs_disc_fit, vel_axis=vel,
+                    center_xy=origin, pa_deg=gamma_disc,
+                    n_shells=num_shells_disc_eff, r_min_pix=rin_pix_disc, r_max_pix=rout_pix_disc,
+                    aperture_deg=disc_aperture, double_cone=disc_double_cone,
+                    pixscale=pixscale, nrebin=nrebin, scale=scale,
+                    min_pixels_per_shell=2, perc=perc_disc, ncloud=npt
                 )
 
-            _ = km.percentile_scatter_per_shell_best(
-                best=disc_best2_for_plots, obs=obs_disc_fit, vel_axis=vel,
-                center_xy=origin, pa_deg=gamma_disc,
-                n_shells=num_shells_disc_eff, r_min_pix=rin_pix_disc, r_max_pix=rout_pix_disc,
-                aperture_deg=disc_aperture, double_cone=disc_double_cone,
-                pixscale=pixscale, nrebin=nrebin, scale=scale,
-                min_pixels_per_shell=2, perc=perc_disc, ncloud=npt
-            )
         except Exception as e:
             logger.warning("DISC summarize/scatter failed: %r", e)
-
             disc_best2_for_plots = None
 
+
+
+
+
         # build disc model cube (UNWEIGHTED copy for outflow context)
-        if USE_GLOBAL_BETA_DISC:
+        if DISC_FIT_MODE in {"disk_kepler", "NSC", "Plummer", "disk_arctan"} or USE_GLOBAL_BETA_DISC:
             model_disc_best = km.build_best_model_from_fit(
                 beta_best=float(disc_fit["beta_best"]),
                 v_best=float(disc_fit["v_best"]),
-                FIT_MODE=DISC_FIT_MODE
+                FIT_MODE=DISC_FIT_MODE,
+                R_nsc=DISC_R_NSC_PC,
+                a_plu=DISC_A_PLU_PC,
+                rt=DISC_RT_ARCSEC,
             )
         else:
             if disc_best2_for_plots is None:
@@ -931,6 +977,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                 vsys=0.0
             )
 
+
         model_disc_best.generate_cube()
         disc_cube_for_outflow = np.array(model_disc_best.cube["data"], copy=True)
 
@@ -941,6 +988,20 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         # overlay
         try:
             inc_for_overlay = float(disc_fit["beta_best"]) if USE_GLOBAL_BETA_DISC else float(np.nanmedian(disc_best2_for_plots["beta"]))
+            if DISC_FIT_MODE == "disk_kepler":
+                disc_title = fr"DISC: β={disc_fit['beta_best']:.1f}°, $M_\bullet$={disc_fit['v_best']:.3e} $M_\odot$"
+            elif DISC_FIT_MODE == "NSC":
+                disc_title = fr"DISC: β={disc_fit['beta_best']:.1f}°, $A$={disc_fit['v_best']:.3e}"
+            elif DISC_FIT_MODE == "Plummer":
+                disc_title = fr"DISC: β={disc_fit['beta_best']:.1f}°, $M_0$={disc_fit['v_best']:.3e} $M_\odot$"
+            elif DISC_FIT_MODE == "disk_arctan":
+                disc_title = fr"DISC: β={disc_fit['beta_best']:.1f}°, $V_{{\max}}$={disc_fit['v_best']:.1f} km s$^{{-1}}$"
+            else:
+                disc_title = fr"DISC: β={disc_fit['beta_best']:.1f}°, v={disc_fit['v_best']:.0f} km s$^{{-1}}$"
+
+
+
+
             km.show_shells_overlay(
                 cube_obs=obs_disc_fit.cube["data"], cube_model=model_disc_best.cube["data"],
                 center_xy=origin, inc_deg=inc_for_overlay, pa_deg=float(gamma_disc),
@@ -948,7 +1009,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                 aperture_deg=disc_aperture, double_cone=disc_double_cone,
                 pixscale=pixscale, nrebin=nrebin, scale=scale,
                 mask_mode="model", edges_mode="model",
-                title=fr"DISC: β={disc_fit['beta_best']:.1f}°, v={disc_fit['v_best']:.0f} km s$^{{-1}}$",
+                title= disc_title,
                 debug_intrinsic=(disc_geometry.lower() == "cylindrical"),
                 xlimit=xrange, ylimit=yrange
             )
@@ -958,22 +1019,36 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
             logger.warning("DISC overlay failed: %r", e)
 
 
+        disc_y_label = {
+            "disk_kepler": r"$M_\bullet$ ($M_\odot$)",
+            "NSC": r"$A$",
+            "Plummer": r"$M_0$ ($M_\odot$)",
+            "disk_arctan": r"$V_{\max}$ (km s$^{-1}$)",
+        }.get(DISC_FIT_MODE, r"$v$ (km s$^{-1}$)")
+
         km.plot_residual_maps_cone(
             disc_fit["chi_squared_map"], disc_fit["beta_array"], disc_fit["v_array"],
-            num_shells_disc_eff, best=disc_best2_for_plots, y_label=r"$v$ (km s$^{-1}$)"
+            num_shells_disc_eff, best=disc_best2_for_plots, y_label= disc_y_label
         )
-        finalize_figure(output_dir / "05_disc_residual_maps.png", show=cfg.output.show_plots)
+        finalize_figure(output_dir / "05_disc_chi2_maps.png", show=cfg.output.show_plots)
 
         try:
-            km.inspect_percentiles_at(
-                float(disc_fit["beta_best"]), float(disc_fit["v_best"]),
-                perc=perc_disc, perc_weights=perc_weights,
-                sigma_perc_kms=SIGMA_PERC_KMS, loss=loss, qgrid=CRPS_QGRID
+            fig, _, _ = km.inspect_percentiles_at(
+                float(disc_fit["beta_best"]),
+                float(disc_fit["v_best"]),
+                perc=perc_disc,
+                perc_weights=perc_weights,
+                sigma_perc_kms=SIGMA_PERC_KMS,
+                loss=loss,
+                qgrid=CRPS_QGRID
             )
-            finalize_figure(output_dir / "06_disc_percentiles.png", show=cfg.output.show_plots)
-
+            if fig is not None:
+                finalize_figure(output_dir / "06_disc_percentiles.png", show=cfg.output.show_plots)
+            else:
+                logger.warning("DISC inspect produced no figure; skipping 06_disc_percentiles.png")
         except Exception as e:
             logger.warning("DISC inspect failed: %r", e)
+
 
 
             
@@ -1087,7 +1162,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
             v_min=v_min_o, v_max=v_max_o, step_v=step_v_o,
             verbose_label=label
             )
-        best_info = _extract_best_fit_with_uncertainties(fit)
+        best_info = km._extract_best_fit_with_uncertainties(fit)
         logger.info(
             "%s Global best: beta=%.1f ± %.1f deg, v=%.0f ± %.0f km/s",
              label,
@@ -1214,18 +1289,26 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
             fit["chi_squared_map"], fit["beta_array"], fit["v_array"],
             n_shells_eff, best=best2, y_label=r"$v$ (km s$^{-1}$)"
         )
-        finalize_figure(output_dir / f"09_{safe_label}_residual_maps.png", show=cfg.output.show_plots)
+        finalize_figure(output_dir / f"09_{safe_label}_chi2_maps.png", show=cfg.output.show_plots)
 
         try:
-            km.inspect_percentiles_at(
-                float(fit["beta_best"]), float(fit["v_best"]),
-                perc=perc_out, perc_weights=perc_weights,
-                sigma_perc_kms=SIGMA_PERC_KMS, loss=loss, qgrid=CRPS_QGRID
+            fig, _, _ = km.inspect_percentiles_at(
+                float(fit["beta_best"]),
+                float(fit["v_best"]),
+                perc=perc_out,
+                perc_weights=perc_weights,
+                sigma_perc_kms=SIGMA_PERC_KMS,
+                loss=loss,
+                qgrid=CRPS_QGRID
             )
-            finalize_figure(output_dir / f"10_{safe_label}_percentiles.png", show=cfg.output.show_plots)
+            if fig is not None:
+                finalize_figure(output_dir / f"10_{safe_label}_percentiles.png", show=cfg.output.show_plots)
+            else:
+                logger.warning("label %r inspect produced no figure; skipping percentile plot", label)
 
         except Exception as e:
             logger.warning("label %r inspect %r", label, e)
+
 
 
         return fit, model_best, best2
@@ -1519,7 +1602,10 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
     # ============================================================
     # 6) FINAL COMBINED MODEL (DISC + OUTFLOW+ + OUTFLOW-) + 3x3 moment comparison
     # ============================================================
-    if (DO_FINAL_COMBINED_MODEL_PLOT or SAVE_ALL_OUTPUTS) and (model_disc_best is not None) and (model_outflow_pos_best is not None or model_outflow_neg_best is not None):
+    if (DO_FINAL_COMBINED_MODEL_PLOT or SAVE_ALL_OUTPUTS) and \
+       (model_disc_best is not None) and \
+       (model_outflow_pos_best is not None) and \
+       (model_outflow_neg_best is not None):
 
         logger.info("\n--- Building final combined (DISC + OUTFLOW+ + OUTFLOW-) model ---")
 
@@ -1544,43 +1630,84 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         vel1_func = km.vout
         vel2_func = km.vout
         vel3_func = km.vout
-
         expradius = 0.05
         fluxpars = [1, expradius / scale]
 
         # ---- DISC component ----
-        radius_shells_disc = km._as_shell_ranges(radius_range_model_disc, num_shells_disc_eff)
-        if USE_GLOBAL_BETA_DISC:
-            beta_arr_disc = [beta_disc_best] * num_shells_disc_eff
-            v_arr_disc    = [v_disc_best]    * num_shells_disc_eff
-        else:
-            beta_arr_disc = list(np.asarray(disc_best2_for_plots["beta"], float))
-            v_arr_disc    = list(np.asarray(disc_best2_for_plots["v"], float))
 
-        m_final = km._make_multishell_component(
-            npt_total=int(npt)*30,
-            n_shells=num_shells_disc_eff,
-            geometry="cylindrical",
-            radius_range_shells=radius_shells_disc,
-            theta_range=disc_theta_range,
-            phi_range=disc_phi_range,
-            zeta_range=disc_zeta_range,
-            logradius=logradius,
-            flux_func=flux_func,
-            vel1_func=vel1_func, vel2_func=vel2_func, vel3_func=vel3_func,
-            vel_sigma=vel_sigma,
-            psf_sigma=psf_sigma,
-            lsf_sigma=lsf_sigma,
-            cube_range=cube_range,
-            cube_nbins=cube_nbins,
-            fluxpars=fluxpars,
-            v_arr=v_arr_disc,
-            beta_arr=beta_arr_disc,
-            xycenter=xycenter,
-            alpha=alpha,
-            gamma=gamma_disc_best,
-            vsys=vsys
-        )
+        if DISC_FIT_MODE in {"disk_kepler", "NSC", "Plummer", "disk_arctan"}:
+            if model_disc_best is None:
+                raise RuntimeError("model_disc_best is None in final combined model build.")
+            m_final = copy.deepcopy(model_disc_best)
+        else:
+            radius_shells_disc = km._as_shell_ranges(radius_range_model_disc, num_shells_disc_eff)
+
+            if USE_GLOBAL_BETA_DISC:
+                beta_arr_disc = [beta_disc_best] * num_shells_disc_eff
+                v_arr_disc    = [v_disc_best]    * num_shells_disc_eff
+            else:
+                beta_arr_disc = list(np.asarray(disc_best2_for_plots["beta"], float))
+                v_arr_disc    = list(np.asarray(disc_best2_for_plots["v"], float))
+
+            m_final = km._make_multishell_component(
+                npt_total=int(npt)*30,
+                n_shells=num_shells_disc_eff,
+                geometry="cylindrical",
+                radius_range_shells=radius_range_model_disc if num_shells_disc_eff == 1 else radius_shells_disc,
+                theta_range=disc_theta_range,
+                phi_range=disc_phi_range,
+                zeta_range=disc_zeta_range,
+                logradius=logradius,
+                flux_func=flux_func,
+                vel1_func=vel1_func, vel2_func=vel2_func, vel3_func=vel3_func,
+                vel_sigma=vel_sigma,
+                psf_sigma=psf_sigma,
+                lsf_sigma=lsf_sigma,
+                cube_range=cube_range,
+                cube_nbins=cube_nbins,
+                fluxpars=fluxpars,
+                v_arr=v_arr_disc,
+                beta_arr=beta_arr_disc,
+                xycenter=xycenter,
+                alpha=alpha,
+                gamma=gamma_disc_best,
+                vsys=vsys
+            )
+
+
+
+            if USE_GLOBAL_BETA_DISC:
+                beta_arr_disc = [beta_disc_best] * num_shells_disc_eff
+                v_arr_disc    = [v_disc_best]    * num_shells_disc_eff
+            else:
+                beta_arr_disc = list(np.asarray(disc_best2_for_plots["beta"], float))
+                v_arr_disc    = list(np.asarray(disc_best2_for_plots["v"], float))
+
+            m_final = km._make_multishell_component(
+                npt_total=int(npt)*30,
+                n_shells=num_shells_disc_eff,
+                geometry="cylindrical",
+                radius_range_shells=radius_range_model_disc if num_shells_disc_eff == 1 else radius_shells_disc,
+                theta_range=disc_theta_range,
+                phi_range=disc_phi_range,
+                zeta_range=disc_zeta_range,
+                logradius=logradius,
+                flux_func=flux_func,
+                vel1_func=vel1_func, vel2_func=vel2_func, vel3_func=vel3_func,
+                vel_sigma=vel_sigma,
+                psf_sigma=psf_sigma,
+                lsf_sigma=lsf_sigma,
+                cube_range=cube_range,
+                cube_nbins=cube_nbins,
+                fluxpars=fluxpars,
+                v_arr=v_arr_disc,
+                beta_arr=beta_arr_disc,
+                xycenter=xycenter,
+                alpha=alpha,
+                gamma=gamma_disc_best,
+                vsys=vsys
+            )
+
 
         # ---- OUTFLOW components  ----
         radius_shells_out = km._as_shell_ranges(radius_range_model_out, num_shells_out)
@@ -1684,11 +1811,15 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
     # ==========================
     best_disc_profile = None
     if disc_fit is not None:
-        best_disc_profile = disc_fit.get("best", None)
+        if DISC_FIT_MODE in {"disk_kepler", "NSC", "Plummer", "disk_arctan"}:
+            best_disc_profile = disc_best2_for_plots
+        else:
+            best_disc_profile = disc_fit.get("best", None)
+
         km._plot_v_profile(
             best_disc_profile,
-            n_shells=num_shells_disc,
-            title="Disc velocity profile",
+            n_shells=num_shells_disc_eff,
+            title="Disc circular velocity profile",
             scale_kpc_per_arcsec=scale,
             rin_pix=rin_pix_disc, rout_pix=rout_pix_disc,
             arcsec_per_pix=arcsec_per_pix
@@ -1787,25 +1918,25 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         ax.legend(fontsize=12, loc='upper left')
         ax.grid(alpha=0.2)
 
-        ax_top = ax.twiny()
-        ax_top.tick_params(axis="both", labelsize=12)
-        ax_top.set_xlim(ax.get_xlim())
-
-        tick_arc = ax.get_xticks()
-        tick_arc = tick_arc[tick_arc >= 0]
-        ax.set_xticks(tick_arc)
-        ax_top.set_xticks(tick_arc)
-        tick_show = tick_arc * scale
-        ax_top.set_xticklabels([f"{round(t,1):.1f}" for t in tick_show])
-        ax_top.set_xlabel("Radius [kpc]", fontsize=14)
         ax.set_xlim(xmin, xmax)
+
+        def a2k(x):
+            return x * float(scale)
+
+        def k2a(x):
+            return x / float(scale)
+
+        secax = ax.secondary_xaxis("top", functions=(a2k, k2a))
+        secax.set_xlabel("Radius [kpc]", fontsize=14)
+        secax.tick_params(axis="both", labelsize=12)
+
 
         plt.tight_layout()
         finalize_figure(output_dir / "99_vel_profiles.png", show=cfg.output.show_plots)
 
 
     # ============================================================
-    # Escape-fraction diagnostic: v_out / (3 * v_disc)
+    # Escape-velocity diagnostic: v_out / v_esc
     # Only valid in disk_then_outflow mode
     # ============================================================
     escape_fraction_plot_path = None
@@ -1817,7 +1948,13 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
     escape_neg = None
     out_avg_prof = None
 
+    v_c_outer = np.nan
+    v_c_outer_err = np.nan
+    vcirc_meta = None
+
     if COMPUTE_ESCAPE_FRACTION:
+
+
         if FIT_COMPONENT_MODE != "disk_then_outflow":
             logger.warning(
                 "compute_escape_fraction=True but FIT_COMPONENT_MODE=%s. "
@@ -1829,7 +1966,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                 "compute_escape_fraction=True but disc profile is not available."
             )
         else:
-            disc_prof = _extract_radial_profile(
+            disc_prof = km._extract_radial_profile(
                 best_profile=best_disc_profile,
                 rin_pix=rin_pix_disc,
                 rout_pix=rout_pix_disc,
@@ -1837,27 +1974,76 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                 arcsec_per_pix=arcsec_per_pix,
             )
 
-            out_pos_prof = None
-            out_neg_prof = None
-            out_avg_prof = None
+            v_c_outer, v_c_outer_err, vcirc_meta = km._estimate_outer_vcirc(
+                disc_prof,
+                method="flat_plateau",
+                outer_fraction=0.3,
+                min_outer_points=2,
+                flat_slope_frac=0.2,
+                min_flat_points=2,
+            )
 
-            if best_out_pos_profile is not None:
-                out_pos_prof = _extract_radial_profile(
-                    best_profile=best_out_pos_profile,
-                    rin_pix=rin_pix_out,
-                    rout_pix=rout_pix_out,
-                    n_shells=num_shells_out,
-                    arcsec_per_pix=arcsec_per_pix,
+            #logger.info(
+            #    "Outer vcirc estimator details: %s",
+            #    vcirc_meta
+            #)
+
+            rc_rising = km._is_rotation_curve_still_rising(disc_prof, outer_fraction=0.3)
+            if rc_rising is True:
+                logger.warning(
+                    "Outer disc rotation curve is still rising in the observed range. "
+                    "Adopted v_c_outer may underestimate the true asymptotic circular velocity; "
+                    "therefore v_esc may be underestimated and v_out/v_esc may be overestimated."
                 )
 
-            if best_out_neg_profile is not None:
-                out_neg_prof = _extract_radial_profile(
-                    best_profile=best_out_neg_profile,
-                    rin_pix=rin_pix_out,
-                    rout_pix=rout_pix_out,
-                    n_shells=num_shells_out,
-                    arcsec_per_pix=arcsec_per_pix,
+            logger.info(
+                "Outer circular velocity adopted: v_c_outer = %.2f +/- %.2f km/s "
+                "(method=%s, n_used=%d, r_range=[%.2f, %.2f] arcsec)",
+                v_c_outer,
+                v_c_outer_err,
+                vcirc_meta["method"],
+                vcirc_meta["n_used"],
+                vcirc_meta.get("r_min_used_arcsec", np.nan),
+                vcirc_meta.get("r_max_used_arcsec", np.nan),
+            )
+
+            if not np.isfinite(v_c_outer) or (v_c_outer <= 0):
+                logger.warning(
+                    "Could not determine a valid outer circular velocity; "
+                    "skipping escape-velocity diagnostic."
                 )
+            else:
+                f_eta_low = float(km._escape_factor_from_eta(np.array([ESCAPE_ETA_LOW]))[0])
+                f_eta_fid = float(km._escape_factor_from_eta(np.array([ESCAPE_ETA_FID]))[0])
+                f_eta_high = float(km._escape_factor_from_eta(np.array([ESCAPE_ETA_HIGH]))[0])
+
+                logger.info(
+                    "Escape-speed multipliers relative to v_c_outer: "
+                    "r_{max}=10 -> %.3f, r_{max}=30 -> %.3f, r_{max}=100 -> %.3f",
+                    f_eta_low, f_eta_fid, f_eta_high
+                )
+
+                out_pos_prof = None
+                out_neg_prof = None
+                out_avg_prof = None
+
+                if best_out_pos_profile is not None:
+                    out_pos_prof = km._extract_radial_profile(
+                            best_profile=best_out_pos_profile,
+                            rin_pix=rin_pix_out,
+                            rout_pix=rout_pix_out,
+                            n_shells=num_shells_out,
+                            arcsec_per_pix=arcsec_per_pix,
+                        )
+    
+                if best_out_neg_profile is not None:
+                    out_neg_prof = km._extract_radial_profile(
+                            best_profile=best_out_neg_profile,
+                            rin_pix=rin_pix_out,
+                            rout_pix=rout_pix_out,
+                            n_shells=num_shells_out,
+                            arcsec_per_pix=arcsec_per_pix,
+                        )
 
             # --------------------------------------------------------
             # Single-shell outflow case: compute one value, but still
@@ -1865,26 +2051,39 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
             # --------------------------------------------------------
             if int(num_shells_out) == 1:
                 if out_pos_prof is not None:
-                    r0 = np.asarray(out_pos_prof["r_arcsec"], dtype=float)[0]
 
-                    disc_v_interp = _interp_with_nan(
-                        np.array([r0]), disc_prof["r_arcsec"], disc_prof["v"]
-                    )[0]
-                    disc_e_interp = _interp_with_nan(
-                        np.array([r0]), disc_prof["r_arcsec"], disc_prof["v_err"]
-                    )[0]
-
-                    ratio, ratio_err = _ratio_and_uncertainty(
+                    ratio, ratio_err, v_esc_arr = km._ratio_to_escape_and_uncertainty(
                         np.array([out_pos_prof["v"][0]]),
                         np.array([out_pos_prof["v_err"][0]]),
-                        np.array([disc_v_interp]),
-                        np.array([disc_e_interp]),
+                        v_c_outer=v_c_outer,
+                        e_c_outer=v_c_outer_err,
+                        eta=ESCAPE_ETA_FID,
                     )
 
+                    ratio_10, _, _ = km._ratio_to_escape_and_uncertainty(
+                        np.array([out_pos_prof["v"][0]]),
+                        np.array([out_pos_prof["v_err"][0]]),
+                        v_c_outer=v_c_outer,
+                        e_c_outer=v_c_outer_err,
+                        eta=ESCAPE_ETA_LOW,
+                    )
+
+                    ratio_100, _, _ = km._ratio_to_escape_and_uncertainty(
+                        np.array([out_pos_prof["v"][0]]),
+                        np.array([out_pos_prof["v_err"][0]]),
+                        v_c_outer=v_c_outer,
+                        e_c_outer=v_c_outer_err,
+                        eta=ESCAPE_ETA_HIGH,
+                    )
+
+
                     logger.info(
-                        "Escape fraction (single cone, +): v_out/(3*v_disc) = %.3f ± %.3f",
+                        "Escape diagnostic (single cone, +): v_out/v_esc = %.3f ± %.3f "
+                        "[eta=%.0f, v_esc=%.1f km/s]",
                         float(ratio[0]),
                         float(ratio_err[0]),
+                        ESCAPE_ETA_FID,
+                        float(v_esc_arr[0]),
                     )
 
                     escape_fraction_singlecone_value = float(ratio[0])
@@ -1895,29 +2094,49 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                         "xerr_arcsec": np.asarray(out_pos_prof["xerr_arcsec"], dtype=float),
                         "ratio": np.asarray(ratio, dtype=float),
                         "ratio_err": np.asarray(ratio_err, dtype=float),
+                        "ratio_loweta": np.asarray(ratio_10, dtype=float),
+                        "ratio_higheta": np.asarray(ratio_100, dtype=float),
+                        "v_esc": np.asarray(v_esc_arr, dtype=float),
+                        "eta": np.full_like(
+                            np.asarray(out_pos_prof["r_arcsec"], dtype=float),
+                            ESCAPE_ETA_FID,
+                            dtype=float,
+                        ),
                     }
 
                 elif out_neg_prof is not None:
-                    r0 = np.asarray(out_neg_prof["r_arcsec"], dtype=float)[0]
 
-                    disc_v_interp = _interp_with_nan(
-                        np.array([r0]), disc_prof["r_arcsec"], disc_prof["v"]
-                    )[0]
-                    disc_e_interp = _interp_with_nan(
-                        np.array([r0]), disc_prof["r_arcsec"], disc_prof["v_err"]
-                    )[0]
-
-                    ratio, ratio_err = _ratio_and_uncertainty(
+                    ratio, ratio_err, v_esc_arr = km._ratio_to_escape_and_uncertainty(
                         np.array([out_neg_prof["v"][0]]),
                         np.array([out_neg_prof["v_err"][0]]),
-                        np.array([disc_v_interp]),
-                        np.array([disc_e_interp]),
+                        v_c_outer=v_c_outer,
+                        e_c_outer=v_c_outer_err,
+                        eta=ESCAPE_ETA_FID,
+                    )
+                    ratio_10, _, _ = km._ratio_to_escape_and_uncertainty(
+                        np.array([out_neg_prof["v"][0]]),
+                        np.array([out_neg_prof["v_err"][0]]),
+                        v_c_outer=v_c_outer,
+                        e_c_outer=v_c_outer_err,
+                        eta=ESCAPE_ETA_LOW,
                     )
 
+                    ratio_100, _, _ = km._ratio_to_escape_and_uncertainty(
+                        np.array([out_neg_prof["v"][0]]),
+                        np.array([out_neg_prof["v_err"][0]]),
+                        v_c_outer=v_c_outer,
+                        e_c_outer=v_c_outer_err,
+                        eta=ESCAPE_ETA_HIGH,
+                    )
+
+
                     logger.info(
-                        "Escape fraction (single cone, -): v_out/(3*v_disc) = %.3f ± %.3f",
+                        "Escape diagnostic (single cone, -): v_out/v_esc = %.3f ± %.3f "
+                        "[eta=%.0f, v_esc=%.1f km/s]",
                         float(ratio[0]),
                         float(ratio_err[0]),
+                        ESCAPE_ETA_FID,
+                        float(v_esc_arr[0]),
                     )
 
                     escape_fraction_singlecone_value = float(ratio[0])
@@ -1928,6 +2147,14 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                         "xerr_arcsec": np.asarray(out_neg_prof["xerr_arcsec"], dtype=float),
                         "ratio": np.asarray(ratio, dtype=float),
                         "ratio_err": np.asarray(ratio_err, dtype=float),
+                        "ratio_loweta": np.asarray(ratio_10, dtype=float),
+                        "ratio_higheta": np.asarray(ratio_100, dtype=float),
+                        "v_esc": np.asarray(v_esc_arr, dtype=float),
+                        "eta": np.full_like(
+                            np.asarray(out_neg_prof["r_arcsec"], dtype=float),
+                            ESCAPE_ETA_FID,
+                            dtype=float,
+                        ),
                     }
 
                 else:
@@ -1955,7 +2182,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                 if SAVE_ESCAPE_FRACTION_TABLE and ((escape_pos is not None) or (escape_neg is not None)):
                     try:
                         escape_fraction_table_path = output_dir / "escape_fraction_profile.fits"
-                        _save_escape_fraction_table_fits(
+                        km._save_escape_fraction_table_fits(
                             {
                                 "ESCAPE_POS": escape_pos,
                                 "ESCAPE_NEG": escape_neg,
@@ -1970,22 +2197,16 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
             # Multi-shell / general case
             # --------------------------------------------------------
             else:
-                def _build_escape_profile(out_prof):
+                def _build_escape_profile(out_prof, eta):
                     if out_prof is None or disc_prof is None:
                         return None
 
-                    disc_v_interp = _interp_with_nan(
-                        out_prof["r_arcsec"], disc_prof["r_arcsec"], disc_prof["v"]
-                    )
-                    disc_e_interp = _interp_with_nan(
-                        out_prof["r_arcsec"], disc_prof["r_arcsec"], disc_prof["v_err"]
-                    )
-
-                    ratio, ratio_err = _ratio_and_uncertainty(
+                    ratio, ratio_err, v_esc = km._ratio_to_escape_and_uncertainty(
                         out_prof["v"],
                         out_prof["v_err"],
-                        disc_v_interp,
-                        disc_e_interp,
+                        v_c_outer=v_c_outer,
+                        e_c_outer=v_c_outer_err,
+                        eta=eta,
                     )
 
                     return {
@@ -1993,32 +2214,83 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                         "xerr_arcsec": np.asarray(out_prof["xerr_arcsec"], dtype=float),
                         "ratio": np.asarray(ratio, dtype=float),
                         "ratio_err": np.asarray(ratio_err, dtype=float),
+                        "v_esc": np.asarray(v_esc, dtype=float),
+                        "eta": np.full_like(out_prof["r_arcsec"], float(eta), dtype=float),
                     }
 
-                escape_pos = _build_escape_profile(out_pos_prof)
-                escape_neg = _build_escape_profile(out_neg_prof)
+                escape_pos_10 = _build_escape_profile(out_pos_prof, eta=10.0)
+                escape_pos_30 = _build_escape_profile(out_pos_prof, eta=30.0)
+                escape_pos_100 = _build_escape_profile(out_pos_prof, eta=100.0)
 
-                # Average of the two cones, shell by shell
-                if (escape_pos is not None) and (escape_neg is not None):
+                escape_neg_10 = _build_escape_profile(out_neg_prof, eta=10.0)
+                escape_neg_30 = _build_escape_profile(out_neg_prof, eta=30.0)
+                escape_neg_100 = _build_escape_profile(out_neg_prof, eta=100.0)
+
+                # Use eta=30 as the fiducial profile for plotting/table output
+                escape_pos = escape_pos_30
+                escape_neg = escape_neg_30
+
+                if escape_pos is not None:
+                    escape_pos["ratio_loweta"] = np.asarray(escape_pos_10["ratio"], dtype=float) if escape_pos_10 is not None else np.full_like(escape_pos["ratio"], np.nan, dtype=float)
+                    escape_pos["ratio_higheta"] = np.asarray(escape_pos_100["ratio"], dtype=float) if escape_pos_100 is not None else np.full_like(escape_pos["ratio"], np.nan, dtype=float)
+
+                if escape_neg is not None:
+                    escape_neg["ratio_loweta"] = np.asarray(escape_neg_10["ratio"], dtype=float) if escape_neg_10 is not None else np.full_like(escape_neg["ratio"], np.nan, dtype=float)
+                    escape_neg["ratio_higheta"] = np.asarray(escape_neg_100["ratio"], dtype=float) if escape_neg_100 is not None else np.full_like(escape_neg["ratio"], np.nan, dtype=float)
+
+
+
+
+                if escape_pos_10 is not None and escape_pos_30 is not None and escape_pos_100 is not None:
+                    logger.info(
+                        "Outflow (+) escape diagnostic built for r_{max} = %.0f kpc, %.0f kpc, %.0f kpc",
+                        ESCAPE_ETA_LOW, ESCAPE_ETA_FID, ESCAPE_ETA_HIGH
+                    )
+
+                if escape_neg_10 is not None and escape_neg_30 is not None and escape_neg_100 is not None:
+                    logger.info(
+                        "Outflow (-) escape diagnostic built for r_{max} = %.0f kpc, %.0f kpc, %.0f kpc",
+                        ESCAPE_ETA_LOW, ESCAPE_ETA_FID, ESCAPE_ETA_HIGH
+                    )
+
+                # Average of the two cones, shell by shell, with fiducial and halo-range envelopes
+                if (out_pos_prof is not None) and (out_neg_prof is not None):
                     v_avg = 0.5 * (out_pos_prof["v"] + out_neg_prof["v"])
                     e_avg = 0.5 * np.sqrt(out_pos_prof["v_err"]**2 + out_neg_prof["v_err"]**2)
 
-                    disc_v_interp = _interp_with_nan(
-                        out_pos_prof["r_arcsec"], disc_prof["r_arcsec"], disc_prof["v"]
-                    )
-                    disc_e_interp = _interp_with_nan(
-                        out_pos_prof["r_arcsec"], disc_prof["r_arcsec"], disc_prof["v_err"]
+                    ratio_avg_10, _, _ = km._ratio_to_escape_and_uncertainty(
+                        v_avg,
+                        e_avg,
+                        v_c_outer=v_c_outer,
+                        e_c_outer=v_c_outer_err,
+                        eta=ESCAPE_ETA_LOW,
                     )
 
-                    ratio_avg, ratio_avg_err = _ratio_and_uncertainty(
-                        v_avg, e_avg, disc_v_interp, disc_e_interp
+                    ratio_avg_30, ratio_avg_err, v_esc_avg = km._ratio_to_escape_and_uncertainty(
+                        v_avg,
+                        e_avg,
+                        v_c_outer=v_c_outer,
+                        e_c_outer=v_c_outer_err,
+                        eta=ESCAPE_ETA_FID,
+                    )
+
+                    ratio_avg_100, _, _ = km._ratio_to_escape_and_uncertainty(
+                        v_avg,
+                        e_avg,
+                        v_c_outer=v_c_outer,
+                        e_c_outer=v_c_outer_err,
+                        eta=ESCAPE_ETA_HIGH,
                     )
 
                     out_avg_prof = {
                         "r_arcsec": np.asarray(out_pos_prof["r_arcsec"], dtype=float),
                         "xerr_arcsec": np.asarray(out_pos_prof["xerr_arcsec"], dtype=float),
-                        "ratio": np.asarray(ratio_avg, dtype=float),
+                        "ratio": np.asarray(ratio_avg_30, dtype=float),
                         "ratio_err": np.asarray(ratio_avg_err, dtype=float),
+                        "v_esc": np.asarray(v_esc_avg, dtype=float),
+                        "eta": np.full_like(np.asarray(out_pos_prof["r_arcsec"], dtype=float), ESCAPE_ETA_FID, dtype=float),
+                        "ratio_loweta": np.asarray(ratio_avg_10, dtype=float),
+                        "ratio_higheta": np.asarray(ratio_avg_100, dtype=float),
                     }
                 else:
                     out_avg_prof = None
@@ -2030,7 +2302,6 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                 else:
                     escape_fraction_plot_path = output_dir / "017_escape_fraction_profile.png"
 
-                    # Single-cone: plot only the available cone
                     if (escape_pos is not None) and (escape_neg is None):
                         _plot_escape_fraction_profile(
                             output_path=escape_fraction_plot_path,
@@ -2057,7 +2328,6 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                             show_plots=cfg.output.show_plots,
                         )
 
-                    # Bicone: plot both cones and the average
                     else:
                         _plot_escape_fraction_profile(
                             output_path=escape_fraction_plot_path,
@@ -2071,11 +2341,10 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                             show_plots=cfg.output.show_plots,
                         )
 
-                    # Save optional FITS table
                     if SAVE_ESCAPE_FRACTION_TABLE:
                         try:
                             escape_fraction_table_path = output_dir / "escape_fraction_profile.fits"
-                            _save_escape_fraction_table_fits(
+                            km._save_escape_fraction_table_fits(
                                 {
                                     "ESCAPE_POS": escape_pos,
                                     "ESCAPE_NEG": escape_neg,
@@ -2087,6 +2356,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                             logger.warning("Failed to save escape fraction FITS table: %r", e)
 
 
+
     # ============================================================
     # SAVE ALL OUTPUTS
     # ============================================================
@@ -2094,14 +2364,14 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         if final_model is not None:
             try:
                 cube_out = output_dir / final_model_name
-                _save_model_cube_fits(final_model, obs, cube_out)
+                km._save_model_cube_fits(final_model, obs, cube_out)
                 logger.info("Saved best-fit weighted model cube to %s", cube_out)
             except Exception as e:
                 logger.warning("Failed to save best-fit model cube: %r", e)
 
             try:
                 maps_out = output_dir / "bestfit_moment_maps.fits"
-                _save_moment_maps_fits(obs, final_model, maps_out)
+                km._save_moment_maps_fits(obs, final_model, maps_out)
                 logger.info("Saved data/model/residual moment maps to %s", maps_out)
             except Exception as e:
                 logger.warning("Failed to save moment maps FITS: %r", e)
@@ -2143,7 +2413,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         summary["disc_pa_unc_deg"] = (
             float(gamma_disc_unc) if gamma_disc_unc is not None else None
         )
-        summary["disc_pa_mode"] = "fixed" if cfg.fit.disc_pa_deg is not None else "estimated"
+        summary["disc_pa_mode"] = "fixed" if disc_cfg.pa_deg is not None else "estimated"
     else:
         summary["disc_pa_deg"] = None
         summary["disc_pa_unc_deg"] = None
@@ -2153,16 +2423,19 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
     # Disc fit
     # ----------------------------
     if disc_present and (disc_fit is not None):
-        disc_best_info = _extract_best_fit_with_uncertainties(disc_fit)
+        disc_best_info = km._extract_best_fit_with_uncertainties(disc_fit)
         summary["disc_best_beta_deg"] = disc_best_info["beta_best"]
         summary["disc_best_beta_err_deg"] = disc_best_info["beta_err"]
-        summary["disc_best_v_kms"] = disc_best_info["v_best"]
-        summary["disc_best_v_err_kms"] = disc_best_info["v_err"]
+        summary["disc_fit_mode"] = DISC_FIT_MODE
+        summary["disc_best_param"] = disc_best_info["v_best"]
+        summary["disc_best_param_err"] = disc_best_info["v_err"]
+
     else:
         summary["disc_best_beta_deg"] = None
         summary["disc_best_beta_err_deg"] = None
-        summary["disc_best_v_kms"] = None
-        summary["disc_best_v_err_kms"] = None
+        summary["disc_fit_mode"] = DISC_FIT_MODE
+        summary["disc_best_param"] = None
+        summary["disc_best_param_err"] = None
 
     # ----------------------------
     # Single-cone outflow
@@ -2175,7 +2448,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         summary["outflow_best_v_err_kms"] = None
 
         if outflow_fit_pos is not None:
-            out_best_info = _extract_best_fit_with_uncertainties(outflow_fit_pos)
+            out_best_info = km._extract_best_fit_with_uncertainties(outflow_fit_pos)
             summary["outflow_best_beta_deg"] = out_best_info["beta_best"]
             summary["outflow_best_beta_err_deg"] = out_best_info["beta_err"]
             summary["outflow_best_v_kms"] = out_best_info["v_best"]
@@ -2183,7 +2456,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
             summary["outflow_lobe"] = "positive"
 
         elif outflow_fit_neg is not None:
-            out_best_info = _extract_best_fit_with_uncertainties(outflow_fit_neg)
+            out_best_info = km._extract_best_fit_with_uncertainties(outflow_fit_neg)
             summary["outflow_best_beta_deg"] = out_best_info["beta_best"]
             summary["outflow_best_beta_err_deg"] = out_best_info["beta_err"]
             summary["outflow_best_v_kms"] = out_best_info["v_best"]
@@ -2213,7 +2486,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         summary["outflow_best_v_err_kms"] = None
 
         if outflow_fit_pos is not None:
-            out_pos_info = _extract_best_fit_with_uncertainties(outflow_fit_pos)
+            out_pos_info = km._extract_best_fit_with_uncertainties(outflow_fit_pos)
             summary["outflow_pos_best_beta_deg"] = out_pos_info["beta_best"]
             summary["outflow_pos_best_beta_err_deg"] = out_pos_info["beta_err"]
             summary["outflow_pos_best_v_kms"] = out_pos_info["v_best"]
@@ -2225,7 +2498,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
             summary["outflow_pos_best_v_err_kms"] = None
 
         if outflow_fit_neg is not None:
-            out_neg_info = _extract_best_fit_with_uncertainties(outflow_fit_neg)
+            out_neg_info = km._extract_best_fit_with_uncertainties(outflow_fit_neg)
             summary["outflow_neg_best_beta_deg"] = out_neg_info["beta_best"]
             summary["outflow_neg_best_beta_err_deg"] = out_neg_info["beta_err"]
             summary["outflow_neg_best_v_kms"] = out_neg_info["v_best"]
@@ -2259,9 +2532,19 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
 
 
     # ----------------------------
-    # Escape-fraction summary
+    # Escape-velocity diagnostic summary
     # Only meaningful for disk_then_outflow mode
     # ----------------------------
+
+    summary["escape_vcirc_outer_kms"] = None
+    summary["escape_vcirc_outer_err_kms"] = None
+    summary["escape_vcirc_outer_method"] = None
+    summary["escape_vcirc_outer_rising_flag"] = None
+    summary["escape_eta_low"] = ESCAPE_ETA_LOW
+    summary["escape_eta_fid"] = ESCAPE_ETA_FID
+    summary["escape_eta_high"] = ESCAPE_ETA_HIGH
+
+
     summary["compute_escape_fraction"] = bool(COMPUTE_ESCAPE_FRACTION)
     summary["escape_fraction_singlecone"] = None
     summary["escape_fraction_singlecone_err"] = None
@@ -2273,6 +2556,19 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
     summary["escape_fraction_avg_available"] = None
 
     if COMPUTE_ESCAPE_FRACTION and FIT_COMPONENT_MODE == "disk_then_outflow":
+
+        if "v_c_outer" in locals() and np.isfinite(v_c_outer):
+            summary["escape_vcirc_outer_kms"] = float(v_c_outer)
+
+        if "v_c_outer_err" in locals() and np.isfinite(v_c_outer_err):
+            summary["escape_vcirc_outer_err_kms"] = float(v_c_outer_err)
+
+        if "vcirc_meta" in locals() and isinstance(vcirc_meta, dict):
+            summary["escape_vcirc_outer_method"] = vcirc_meta.get("method", None)
+
+        if "rc_rising" in locals():
+            summary["escape_vcirc_outer_rising_flag"] = None if rc_rising is None else bool(rc_rising)
+
         # These variables should have been set in the escape-fraction block
         # If they do not exist, keep the fields as None
         if "escape_fraction_plot_path" in locals() and escape_fraction_plot_path is not None:
@@ -2309,12 +2605,6 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         _save_summary(summary, output_dir)
 
     return summary
-
-
-
-
-
-
 
 
 
