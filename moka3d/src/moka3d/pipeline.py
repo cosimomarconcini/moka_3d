@@ -27,6 +27,7 @@ from matplotlib.ticker import AutoMinorLocator
 
 from . import moka3d_source as km
 from .plotting import finalize_figure
+import astropy.units as u
 
 from astropy.io import fits
 
@@ -294,6 +295,71 @@ def _plot_escape_fraction_profile(
 
 
 
+def _plot_outflow_energetics_profile(
+    *,
+    output_path: Path,
+    scale_kpc_per_arcsec: float,
+    radius_range_model_out,
+    pos_profile=None,
+    neg_profile=None,
+    show_plots=False,
+):
+    fig, ax = plt.subplots(figsize=(6.5, 4.8), dpi=300)
+
+    ax.xaxis.set_minor_locator(AutoMinorLocator(2))
+    ax.yaxis.set_minor_locator(AutoMinorLocator(2))
+    ax.tick_params(which="minor", length=3)
+    ax.tick_params(axis="both", labelsize=12)
+
+    def _draw(profile, label):
+        if profile is None:
+            return
+
+        r = np.asarray(profile["r_arcsec"], dtype=float)
+        xerr = 0.5 * np.asarray(profile["dr_arcsec"], dtype=float)
+
+        # standard-density fallback: draw shaded band
+        if "mdot_lo_msun_yr" in profile and "mdot_hi_msun_yr" in profile:
+            lo = np.asarray(profile["mdot_lo_msun_yr"], dtype=float)
+            hi = np.asarray(profile["mdot_hi_msun_yr"], dtype=float)
+            mid = np.asarray(profile["mdot_mid_msun_yr"], dtype=float)
+
+            good = np.isfinite(r) & np.isfinite(lo) & np.isfinite(hi) & np.isfinite(mid) & (lo > 0) & (hi > 0) & (mid > 0)
+            if np.any(good):
+                ax.fill_between(r[good], lo[good], hi[good], alpha=0.2)
+                ax.errorbar(r[good], mid[good], xerr=xerr[good], fmt="o-", lw=1.5, capsize=4, label=label)
+        else:
+            y = np.asarray(profile["mdot_msun_yr"], dtype=float)
+            good = np.isfinite(r) & np.isfinite(y) & (y > 0)
+            if np.any(good):
+                ax.errorbar(r[good], y[good], xerr=xerr[good], fmt="o-", lw=1.5, capsize=4, label=label)
+
+    _draw(pos_profile, "Outflow (+)")
+    _draw(neg_profile, "Outflow (-)")
+
+    ax.set_xlabel(r"Radius [arcsec]", fontsize=14)
+    ax.set_ylabel(r"$\dot{M}_{\rm out}$ [$M_\odot$ yr$^{-1}$]", fontsize=14)
+    ax.set_yscale("log")
+    ax.grid(alpha=0.2)
+    ax.legend(fontsize=11, loc="best")
+
+    xmin, xmax = 0.0, float(radius_range_model_out[1])
+    pad = 0.02 * (xmax - xmin) if xmax > xmin else 0.1
+    ax.set_xlim(xmin, xmax + pad)
+
+    def a2k(x):
+        return x * float(scale_kpc_per_arcsec)
+
+    def k2a(x):
+        return x / float(scale_kpc_per_arcsec)
+
+    secax = ax.secondary_xaxis("top", functions=(a2k, k2a))
+    secax.set_xlabel("Radius [kpc]", fontsize=14)
+    secax.tick_params(axis="both", labelsize=12)
+
+    plt.tight_layout()
+    finalize_figure(output_path, show=show_plots)
+
 
 
 
@@ -318,6 +384,26 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
     obscube, obshead, wcs2d, wcs_large, hdu_index = km.load_cube_and_wcs(
         str(cfg.paths.data_dir), cfg.input.cube_file
     )
+
+    bunit_header = obshead.get("BUNIT", None)
+    flux_unit_scale = km.flux_unit_scale_from_bunit(bunit_header)
+
+    if bunit_header is not None:
+        logger.info("Input cube BUNIT = %s", bunit_header)
+
+    if flux_unit_scale is None:
+        logger.warning(
+            "Could not parse BUNIT from the input FITS header. "
+            "Energetics will assume the cube is already in erg s^-1 cm^-2 Angstrom^-1. "
+            "This may cause an order-of-magnitude unit error in the energetics calculation."
+        )
+        flux_unit_scale = 1.0
+    else:
+        logger.info(
+            "Energetics flux-unit scale factor derived from BUNIT = %.6e",
+            flux_unit_scale,
+        )
+
 
     if cfg.input.sn_map is not None:
         obscube = km.apply_sn_mask_to_cube(
@@ -391,6 +477,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
 
     Dc, D_L, D_A, tL, scale = km.distances_from_z(cfg.target.redshift, cosmo)
 
+   
     crpix, crval, cdelt, dv, ref_pix_0based, x0_bin, y0_bin = km.observed_wcs_params_from_vel(
         vel_kms, i0, x_cen, y_cen, pixscale, cfg.processing.nrebin
     )
@@ -625,6 +712,21 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
     ESCAPE_ETA_LOW = 10.0
     ESCAPE_ETA_FID = 30.0
     ESCAPE_ETA_HIGH = 100.0
+
+    COMPUTE_ENERGETICS = bool(cfg.advanced.compute_energetics)
+    SAVE_ENERGETICS_TABLE = bool(cfg.advanced.save_energetics_table)
+
+    NE_MAP_NAME = cfg.input.ne_map
+    NE_OUTFLOW = cfg.input.ne_outflow
+    ASSUMED_NE_VALUES = list(cfg.advanced.assumed_ne_values)
+    OIII_METALLICITY_Z_OVER_ZSUN = float(cfg.advanced.oiii_metallicity_z_over_zsun)
+    ne_map_2d = None
+    if NE_MAP_NAME is not None:
+        ne_map_path = Path(cfg.paths.ancillary_dir) / str(NE_MAP_NAME)
+        ne_map_2d = km.load_ne_map(ne_map_path)
+        logger.info("Density map loaded for energetics: %s", ne_map_path)
+
+
     
     # Processing/runtime aliases used throughout the old script
     vel = vel_kms
@@ -737,6 +839,32 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         """Keep pixels inside keep_mask_yx; mask everything else."""
         mask_outside = ~keep_mask_yx
         return km.apply_spatial_mask_to_cube(cube, mask_outside, mode=mode)
+
+
+    def _validate_ne_outflow_list(ne_list, fit_bicone, axis_sign):
+        if ne_list is None:
+            return
+
+        if not isinstance(ne_list, (list, tuple)):
+            raise ValueError("input.ne_outflow must be null or a list.")
+
+        if fit_bicone:
+            if len(ne_list) != 2:
+                raise ValueError(
+                    "For bicone outflow, input.ne_outflow must contain two values: [ne_plus, ne_minus]."
+                )
+        else:
+            if len(ne_list) != 1:
+                raise ValueError(
+                    "For single-cone outflow, input.ne_outflow must contain one value: [ne_single]."
+                )
+
+
+    fit_bicone = (str(OUTFLOW_MASK_MODE).lower() == "bicone") or bool(OUTFLOW_DOUBLE_CONE)
+    if FIT_COMPONENT_MODE in ("outflow", "disk_then_outflow"):
+        _validate_ne_outflow_list(NE_OUTFLOW, fit_bicone, OUTFLOW_AXIS_SIGN)
+
+
     # ========================================
     # 2) DISC FIT
     # ========================================
@@ -2052,7 +2180,6 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
 
         def k2a(x):
             return x / float(scale)
-
         secax = ax.secondary_xaxis("top", functions=(a2k, k2a))
         secax.set_xlabel("Radius [kpc]", fontsize=14)
         secax.tick_params(axis="both", labelsize=12)
@@ -2061,6 +2188,290 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         plt.tight_layout()
         finalize_figure(output_dir / "99_vel_profiles.png", show=cfg.output.show_plots)
 
+
+    # ============================================================
+    # Outflow energetics: shell-by-shell M, Mdot, Pdot, Edot
+    # Available only when outflow is part of the fit
+    # ============================================================
+    energetics_pos = None
+    energetics_neg = None
+    energetics_plot_path = None
+
+
+    if COMPUTE_ENERGETICS:
+
+        if FIT_COMPONENT_MODE == "disk":
+            logger.warning(
+                "compute_energetics=True but FIT_COMPONENT_MODE='disk'. "
+                "Skipping outflow energetics."
+            )
+
+        else:
+            line_id = km.identify_emission_line(
+                cfg.line.wavelength_line,
+                cfg.line.wavelength_line_unit
+            )
+
+            if line_id is None:
+                logger.warning(
+                    "compute_energetics=True but the selected emission line "
+                    "(wavelength_line=%.2f %s) is not currently supported for energetics. "
+                    "At the moment energetics are implemented only for [OIII]5007, Halpha, and Hbeta. "
+                    "Skipping energetics calculation. This is still work in progress.",
+                    float(cfg.line.wavelength_line),
+                    str(cfg.line.wavelength_line_unit),
+                )
+            else:
+                logger.info(
+                    "Energetics enabled: recognized emission line = %s",
+                    km.emission_line_label(line_id)
+                                )
+                logger.info(km.energetics_line_description(line_id))
+                logger.info(
+                    "Shell line fluxes will be computed as sum(cube) * d_lambda * unit_scale, "
+                    "with unit_scale=%.6e from FITS BUNIT.",
+                    flux_unit_scale,
+                )
+
+
+                lambda_obs_ang = (line_obs.to(u.AA)).value
+                dv_kms = float(np.nanmedian(np.abs(np.diff(vel))))
+
+                def _fallback_density_array(profile_len, ne_scalar):
+                    return np.full(int(profile_len), float(ne_scalar), dtype=float)
+
+                def _build_one_lobe_energetics(obs_lobe, best2_profile, sign_label, fallback_ne=None):
+                    if (obs_lobe is None) or (best2_profile is None):
+                        return None
+
+                    vel_prof = km._extract_radial_profile(
+                        best_profile=best2_profile,
+                        rin_pix=rin_pix_out,
+                        rout_pix=rout_pix_out,
+                        n_shells=num_shells_out,
+                        arcsec_per_pix=arcsec_per_pix,
+                    )
+                    if vel_prof is None:
+                        return None
+
+                    r_edges_pix = km.radial_shell_edges_pix(rin_pix_out, rout_pix_out, num_shells_out)
+                    shell_masks = km.radial_shell_masks_yx(
+                        shape_yx=obs_lobe.cube["data"].shape[1:],
+                        center_xy=origin,
+                        r_edges_pix=r_edges_pix,
+                        extra_mask=None,
+                    )
+
+                    if ne_map_2d is not None:
+                        ne_shell = km.shell_density_from_map(ne_map_2d, shell_masks, reducer="median")
+
+                        if fallback_ne is not None:
+                            bad = ~np.isfinite(ne_shell) | (ne_shell <= 0)
+                            ne_shell[bad] = float(fallback_ne)
+
+                        prof = km.build_outflow_energetics_profile(
+                            cube_data=obs_lobe.cube["data"],
+                            center_xy=origin,
+                            rmin_pix=rin_pix_out,
+                            rmax_pix=rout_pix_out,
+                            n_shells=num_shells_out,
+                            arcsec_per_pix=arcsec_per_pix,
+                            scale_kpc_per_arcsec=scale,
+                            dv_kms=dv_kms,
+                            lambda_obs_angstrom=lambda_obs_ang,
+                            luminosity_distance_mpc=D_L.to_value("Mpc"),
+                            velocity_profile=vel_prof,
+                            ne_shell=ne_shell,
+                            line_id=line_id,
+                            z_over_zsun=OIII_METALLICITY_Z_OVER_ZSUN,
+                            flux_unit_scale=flux_unit_scale,
+                        )
+                        prof["density_mode"] = "map"
+                        return prof
+
+                    if fallback_ne is not None:
+                        ne_shell = _fallback_density_array(len(vel_prof["v"]), fallback_ne)
+
+                        prof = km.build_outflow_energetics_profile(
+                            cube_data=obs_lobe.cube["data"],
+                            center_xy=origin,
+                            rmin_pix=rin_pix_out,
+                            rmax_pix=rout_pix_out,
+                            n_shells=num_shells_out,
+                            arcsec_per_pix=arcsec_per_pix,
+                            scale_kpc_per_arcsec=scale,
+                            dv_kms=dv_kms,
+                            lambda_obs_angstrom=lambda_obs_ang,
+                            luminosity_distance_mpc=D_L.to_value("Mpc"),
+                            velocity_profile=vel_prof,
+                            ne_shell=ne_shell,
+                            line_id=line_id,
+                            z_over_zsun=OIII_METALLICITY_Z_OVER_ZSUN,
+                            flux_unit_scale=flux_unit_scale,
+                        )
+                        prof["density_mode"] = "constant"
+                        return prof
+
+                    assumed_profiles = []
+                    for ne_assumed in ASSUMED_NE_VALUES:
+                        ne_shell = _fallback_density_array(len(vel_prof["v"]), ne_assumed)
+                        pp = km.build_outflow_energetics_profile(
+                            cube_data=obs_lobe.cube["data"],
+                            center_xy=origin,
+                            rmin_pix=rin_pix_out,
+                            rmax_pix=rout_pix_out,
+                            n_shells=num_shells_out,
+                            arcsec_per_pix=arcsec_per_pix,
+                            scale_kpc_per_arcsec=scale,
+                            dv_kms=dv_kms,
+                            lambda_obs_angstrom=lambda_obs_ang,
+                            luminosity_distance_mpc=D_L.to_value("Mpc"),
+                            velocity_profile=vel_prof,
+                            ne_shell=ne_shell,
+                            line_id=line_id,
+                            z_over_zsun=OIII_METALLICITY_Z_OVER_ZSUN,
+                            flux_unit_scale=flux_unit_scale,
+                        )
+                        assumed_profiles.append((float(ne_assumed), pp))
+
+                    prof0 = copy.deepcopy(assumed_profiles[0][1])
+                    mdot_stack = np.vstack([pp["mdot_msun_yr"] for _, pp in assumed_profiles])
+                    mass_stack = np.vstack([pp["mass_msun"] for _, pp in assumed_profiles])
+                    pdot_stack = np.vstack([pp["pdot_dyne"] for _, pp in assumed_profiles])
+                    edot_stack = np.vstack([pp["edot_erg_s"] for _, pp in assumed_profiles])
+
+                    prof0["density_mode"] = "assumed_grid"
+                    prof0["assumed_ne_values_cm3"] = np.array([nn for nn, _ in assumed_profiles], dtype=float)
+
+                    prof0["mdot_lo_msun_yr"] = np.nanmin(mdot_stack, axis=0)
+                    prof0["mdot_hi_msun_yr"] = np.nanmax(mdot_stack, axis=0)
+                    prof0["mdot_mid_msun_yr"] = assumed_profiles[1][1]["mdot_msun_yr"] if len(assumed_profiles) >= 2 else assumed_profiles[0][1]["mdot_msun_yr"]
+
+                    prof0["mass_lo_msun"] = np.nanmin(mass_stack, axis=0)
+                    prof0["mass_hi_msun"] = np.nanmax(mass_stack, axis=0)
+
+                    prof0["pdot_lo_dyne"] = np.nanmin(pdot_stack, axis=0)
+                    prof0["pdot_hi_dyne"] = np.nanmax(pdot_stack, axis=0)
+
+                    prof0["edot_lo_erg_s"] = np.nanmin(edot_stack, axis=0)
+                    prof0["edot_hi_erg_s"] = np.nanmax(edot_stack, axis=0)
+
+                    return prof0
+
+                fit_bicone_now = (str(OUTFLOW_MASK_MODE).lower() == "bicone") or bool(OUTFLOW_DOUBLE_CONE)
+
+                ne_plus_const = None
+                ne_minus_const = None
+
+                if NE_OUTFLOW is not None:
+                    if fit_bicone_now:
+                        ne_plus_const = float(NE_OUTFLOW[0])
+                        ne_minus_const = float(NE_OUTFLOW[1])
+                    else:
+                        if OUTFLOW_AXIS_SIGN >= 0:
+                            ne_plus_const = float(NE_OUTFLOW[0])
+                        else:
+                            ne_minus_const = float(NE_OUTFLOW[0])
+
+                energetics_pos = _build_one_lobe_energetics(
+                    obs_lobe=obs_out_pos,
+                    best2_profile=out_best2_pos,
+                    sign_label="+",
+                    fallback_ne=ne_plus_const,
+                )
+
+                energetics_neg = _build_one_lobe_energetics(
+                    obs_lobe=obs_out_neg,
+                    best2_profile=out_best2_neg,
+                    sign_label="-",
+                    fallback_ne=ne_minus_const,
+                )
+
+                if (energetics_pos is None) and (energetics_neg is None):
+                    logger.warning(
+                        "compute_energetics=True but no valid outflow energetics profile could be built."
+                    )
+                else:
+                    energetics_plot_path = output_dir / "018_outflow_mdot_profile.png"
+                    _plot_outflow_energetics_profile(
+                        output_path=energetics_plot_path,
+                        scale_kpc_per_arcsec=scale,
+                        radius_range_model_out=radius_range_model_out,
+                        pos_profile=energetics_pos,
+                        neg_profile=energetics_neg,
+                        show_plots=cfg.output.show_plots,
+                    )
+
+                    if SAVE_ENERGETICS_TABLE:
+                        try:
+                            if energetics_pos is not None:
+                                km.save_energetics_table_fits(
+                                    energetics_pos,
+                                    output_dir / "outflow_energetics_pos.fits"
+                                )
+                            if energetics_neg is not None:
+                                km.save_energetics_table_fits(
+                                    energetics_neg,
+                                    output_dir / "outflow_energetics_neg.fits"
+                                )
+                        except Exception as e:
+                            logger.warning("Failed to save energetics FITS tables: %r", e)
+
+                    if energetics_pos is not None:
+                        mdot_tot = np.nansum(np.asarray(energetics_pos.get("mdot_msun_yr", np.nan), dtype=float))
+                        pdot_tot = np.nansum(np.asarray(energetics_pos.get("pdot_dyne", np.nan), dtype=float))
+                        edot_tot = np.nansum(np.asarray(energetics_pos.get("edot_erg_s", np.nan), dtype=float))
+
+                        logger.info(
+                            "Energetics (+): line=%s, density_mode=%s, "
+                            "total_mdot=%.3e Msun/yr, total_pdot=%.3e dyne, total_edot=%.3e erg/s",
+                            line_id,
+                            energetics_pos.get("density_mode", "unknown"),
+                            mdot_tot,
+                            pdot_tot,
+                            edot_tot,
+                        )
+
+
+
+                    if energetics_neg is not None:
+                        mdot_tot = np.nansum(np.asarray(energetics_neg.get("mdot_msun_yr", np.nan), dtype=float))
+                        pdot_tot = np.nansum(np.asarray(energetics_neg.get("pdot_dyne", np.nan), dtype=float))
+                        edot_tot = np.nansum(np.asarray(energetics_neg.get("edot_erg_s", np.nan), dtype=float))
+
+                        logger.info(
+                            "Energetics (-): line=%s, density_mode=%s, "
+                            "total_mdot=%.3e Msun/yr, total_pdot=%.3e dyne, total_edot=%.3e erg/s",
+                            line_id,
+                            energetics_neg.get("density_mode", "unknown"),
+                            mdot_tot,
+                            pdot_tot,
+                            edot_tot,
+                        )
+
+                    if (energetics_pos is not None) or (energetics_neg is not None):
+
+                        mdot_global = 0.0
+                        pdot_global = 0.0
+                        edot_global = 0.0
+
+                        if energetics_pos is not None:
+                            mdot_global += np.nansum(np.asarray(energetics_pos["mdot_msun_yr"], dtype=float))
+                            pdot_global += np.nansum(np.asarray(energetics_pos["pdot_dyne"], dtype=float))
+                            edot_global += np.nansum(np.asarray(energetics_pos["edot_erg_s"], dtype=float))
+
+                        if energetics_neg is not None:
+                            mdot_global += np.nansum(np.asarray(energetics_neg["mdot_msun_yr"], dtype=float))
+                            pdot_global += np.nansum(np.asarray(energetics_neg["pdot_dyne"], dtype=float))
+                            edot_global += np.nansum(np.asarray(energetics_neg["edot_erg_s"], dtype=float))
+
+                        logger.info(
+                            "Total outflow energetics: "
+                            "Mdot=%.3e Msun/yr, Pdot=%.3e dyne, Edot=%.3e erg/s",
+                            mdot_global,
+                            pdot_global,
+                            edot_global,
+                        )
 
     # ============================================================
     # Escape-velocity diagnostic: v_out / v_esc
@@ -2682,6 +3093,50 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
     summary["escape_fraction_neg_available"] = None
     summary["escape_fraction_avg_available"] = None
 
+    summary["compute_energetics"] = bool(COMPUTE_ENERGETICS)
+    summary["energetics_plot_path"] = str(energetics_plot_path) if energetics_plot_path is not None else None
+    summary["energetics_pos_density_mode"] = energetics_pos.get("density_mode", None) if energetics_pos is not None else None
+    summary["energetics_neg_density_mode"] = energetics_neg.get("density_mode", None) if energetics_neg is not None else None
+
+
+    summary["energetics_pos_total_mdot_msun_yr"] = (
+    float(np.nansum(energetics_pos["mdot_msun_yr"])) if energetics_pos is not None else None
+    )
+
+    summary["energetics_pos_total_pdot_dyne"] = (
+    float(np.nansum(energetics_pos["pdot_dyne"])) if energetics_pos is not None else None
+    )
+
+    summary["energetics_pos_total_edot_erg_s"] = (
+    float(np.nansum(energetics_pos["edot_erg_s"])) if energetics_pos is not None else None
+    )
+
+    summary["energetics_neg_total_mdot_msun_yr"] = (
+    float(np.nansum(energetics_neg["mdot_msun_yr"])) if energetics_neg is not None else None
+    )
+
+    summary["energetics_neg_total_pdot_dyne"] = (
+    float(np.nansum(energetics_neg["pdot_dyne"])) if energetics_neg is not None else None
+    )
+
+    summary["energetics_neg_total_edot_erg_s"] = (
+    float(np.nansum(energetics_neg["edot_erg_s"])) if energetics_neg is not None else None
+    )
+
+
+    summary["energetics_total_mdot_msun_yr"] = (
+        float(mdot_global) if ("mdot_global" in locals()) else None
+    )
+    summary["energetics_total_pdot_dyne"] = (
+        float(pdot_global) if ("pdot_global" in locals()) else None
+    )
+    summary["energetics_total_edot_erg_s"] = (
+        float(edot_global) if ("edot_global" in locals()) else None
+    )
+
+
+
+
     if COMPUTE_ESCAPE_FRACTION and FIT_COMPONENT_MODE == "disk_then_outflow":
 
         if "v_c_outer" in locals() and np.isfinite(v_c_outer):
@@ -2732,7 +3187,6 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         _save_summary(summary, output_dir)
 
     return summary
-
 
 
 

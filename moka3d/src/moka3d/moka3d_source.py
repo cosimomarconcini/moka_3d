@@ -26,6 +26,9 @@ from astropy import constants as const
 from matplotlib.patches import Rectangle
 import math
 import os
+import re
+import astropy.units as u
+
 from scipy.ndimage import gaussian_filter
 from rich.progress import Progress, BarColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
 import logging
@@ -36,6 +39,7 @@ from astropy.coordinates import SkyCoord
 from astropy.constants import c
 from astropy.wcs.utils import proj_plane_pixel_scales
 from matplotlib.patches import Circle
+from astropy.table import Table
 
 from matplotlib.ticker import AutoMinorLocator
 import json
@@ -6292,6 +6296,478 @@ def _extract_radial_profile(best_profile, rin_pix, rout_pix, n_shells, arcsec_pe
         "v_err": v_err[:n],
     }
 
+def flux_unit_scale_from_bunit(bunit_str):
+    """
+    Return the multiplicative scale factor that converts the cube values into
+    cgs flux-density units:
+
+        erg s^-1 cm^-2 Angstrom^-1
+
+    Example:
+        '10**(-20)erg.s**(-1).cm**(-2).angstrom**(-1)'  -> 1e-20
+
+    Returns
+    -------
+    scale : float or None
+        Multiplicative factor to apply to cube values.
+        Returns None if the string cannot be parsed safely.
+    """
+    if bunit_str is None:
+        return None
+
+    s = str(bunit_str).strip().lower()
+    if not s:
+        return None
+
+    # normalize a few common textual variants
+    s = s.replace("angstrom", "Angstrom")
+    s = s.replace("ang", "Angstrom")
+    s = s.replace("erg", "erg")
+    s = s.replace(".s", " s")
+    s = s.replace(".cm", " cm")
+    s = s.replace(".Angstrom", " Angstrom")
+    s = s.replace("*", "*")
+
+    # ---------------------------------------------------------
+    # 1) Try to extract an explicit leading factor like 10**(-20)
+    # ---------------------------------------------------------
+    scale = 1.0
+    m = re.search(r"10\*\*\(\s*([+-]?\d+)\s*\)", s)
+    if m:
+        scale = 10.0 ** float(m.group(1))
+        s = re.sub(r"10\*\*\(\s*[+-]?\d+\s*\)", "", s).strip()
+
+    # Remove separators sometimes used in headers
+    s = s.replace(".", " ")
+    s = " ".join(s.split())
+
+    # ---------------------------------------------------------
+    # 2) Parse the remaining physical unit
+    # ---------------------------------------------------------
+    try:
+        unit = u.Unit(s)
+    except Exception:
+        return None
+
+    target = u.erg / u.s / (u.cm**2) / u.AA
+
+    try:
+        conv = (1.0 * unit).to(target).value
+    except Exception:
+        return None
+
+    return float(scale * conv)
+
+
+def identify_emission_line(wavelength_line, wavelength_line_unit="Angstrom", tol_angstrom=5.0):
+    """
+    Identify which standard optical line is being analyzed from the user YAML.
+    Returns one of:
+        'oiii5007', 'halpha', 'hbeta', or None if unsupported.
+    """
+    wl = (float(wavelength_line) * u.Unit(wavelength_line_unit)).to(u.AA).value
+
+    if abs(wl - 5006.8) <= tol_angstrom:
+        return "oiii5007"
+    if abs(wl - 6562.8) <= tol_angstrom:
+        return "halpha"
+    if abs(wl - 4861.3) <= tol_angstrom:
+        return "hbeta"
+
+    return None
+
+
+def energetics_line_description(line_id):
+    """
+    Human-readable description of the ionized-gas mass prescription used
+    for the energetics calculation.
+    """
+    if line_id == "oiii5007":
+        return (
+            "Since you are using the [OIII]5007 emission line to compute the mass, "
+            "the code uses an [OIII]-based ionized-gas mass estimate following the "
+            "standard Carniani et al.2015 style prescription. "
+            "This is more assumption-dependent than Balmer-line estimates because it "
+            "depends on ionization and metallicity assumptions."
+        )
+
+    if line_id == "halpha":
+        return (
+            "Since you are using the Halpha emission line to compute the mass, "
+            "the code uses the standard recombination-line ionized-gas mass estimate "
+            "based on Halpha luminosity under case-B assumptions."
+        )
+
+    if line_id == "hbeta":
+        return (
+            "Since you are using the Hbeta emission line to compute the mass, "
+            "the code uses the standard recombination-line ionized-gas mass estimate "
+            "based on Hbeta luminosity under case-B assumptions."
+        )
+
+    return (
+        "Energetics are currently implemented only for [OIII]5007, Halpha, and Hbeta. "
+        "For other emission lines this part of the analysis is still work in progress."
+    )
+
+
+def emission_line_label(line_id):
+    if line_id == "oiii5007":
+        return "[OIII]5007"
+    if line_id == "halpha":
+        return "Halpha"
+    if line_id == "hbeta":
+        return "Hbeta"
+    return "unsupported"
+
+
+def load_ne_map(ne_map_path):
+    """
+    Read a density map from a FITS file.
+    Requirement: single 2D image in one extension (primary or first image extension).
+    """
+    if ne_map_path is None:
+        return None
+
+    with fits.open(ne_map_path) as hdul:
+        # prefer first HDU with 2D data
+        data2d = None
+        for hdu in hdul:
+            if getattr(hdu, "data", None) is not None and np.ndim(hdu.data) == 2:
+                data2d = np.array(hdu.data, dtype=float, copy=True)
+                break
+
+    if data2d is None:
+        raise ValueError(f"No 2D density map found in FITS file: {ne_map_path}")
+
+    data2d[~np.isfinite(data2d)] = np.nan
+    data2d[data2d <= 0] = np.nan
+    return data2d
+
+
+def radial_shell_edges_pix(rmin_pix, rmax_pix, n_shells):
+    return np.linspace(float(rmin_pix), float(rmax_pix), int(n_shells) + 1)
+
+
+def radial_shell_masks_yx(shape_yx, center_xy, r_edges_pix, extra_mask=None):
+    """
+    Circular annular shell masks on the sky plane.
+    For outflow energetics this is fine because the lobe masking is already applied
+    outside this function (obs_out_pos / obs_out_neg cubes).
+    """
+    ny, nx = shape_yx
+    x0, y0 = center_xy
+    yy, xx = np.indices((ny, nx), dtype=float)
+    rr = np.sqrt((xx - float(x0))**2 + (yy - float(y0))**2)
+
+    masks = []
+    for i in range(len(r_edges_pix) - 1):
+        mm = (rr >= r_edges_pix[i]) & (rr < r_edges_pix[i + 1])
+        if extra_mask is not None:
+            mm = mm & extra_mask
+        masks.append(mm)
+    return masks
+
+
+def integrated_line_flux_per_shell_from_cube(
+    cube_data,
+    shell_masks,
+    dv_kms,
+    lambda_obs_angstrom,
+    flux_unit_scale=1.0,
+)   :
+    """
+    Compute integrated line flux in each shell from the cube.
+
+    IMPORTANT:
+    This assumes the cube is in flux density units per Angstrom,
+    so F_line = sum(cube) * d_lambda.
+
+    d_lambda = lambda_obs * dv / c
+    """
+    cube_data = np.asarray(cube_data, dtype=float)
+    dlam = float(lambda_obs_angstrom) * abs(float(dv_kms)) / 299792.458
+
+    flux_shell = np.full(len(shell_masks), np.nan, dtype=float)
+    npix_shell = np.zeros(len(shell_masks), dtype=int)
+
+    for i, mask2d in enumerate(shell_masks):
+        npix_shell[i] = int(np.count_nonzero(mask2d))
+        if npix_shell[i] == 0:
+            continue
+
+        shell_sum = np.nansum(cube_data[:, mask2d]) * float(flux_unit_scale)
+        flux_shell[i] = shell_sum * dlam
+
+    return flux_shell, npix_shell
+
+
+def shell_density_from_map(ne_map, shell_masks, reducer="median"):
+    """
+    Derive one n_e value per shell from a 2D density map.
+    Default is median for robustness.
+    """
+    ne_shell = np.full(len(shell_masks), np.nan, dtype=float)
+
+    for i, mask2d in enumerate(shell_masks):
+        vals = np.asarray(ne_map[mask2d], dtype=float)
+        vals = vals[np.isfinite(vals) & (vals > 0)]
+        if vals.size == 0:
+            continue
+
+        if reducer == "mean":
+            ne_shell[i] = np.nanmean(vals)
+        else:
+            ne_shell[i] = np.nanmedian(vals)
+
+    return ne_shell
+
+
+def luminosity_from_flux(flux_erg_s_cm2, luminosity_distance_mpc):
+    """
+    L = 4 pi D_L^2 F
+    """
+    dl_cm = (float(luminosity_distance_mpc) * u.Mpc).to(u.cm).value
+    return 4.0 * np.pi * dl_cm**2 * np.asarray(flux_erg_s_cm2, dtype=float)
+
+
+def ionized_mass_from_luminosity(line_id, luminosity_erg_s, ne_cm3, z_over_zsun=1.0):
+    """
+    Standard ionized-gas mass scalings.
+
+    Hbeta:
+        M ~ 7.2e8 (L_Hb / 1e43) (100 / ne) Msun
+
+    Halpha:
+        M ~ 2.5e8 (L_Ha / 1e43) (100 / ne) Msun
+
+    [OIII]5007:
+        M ~ 4.0e7 (L_OIII / 1e44) (1000 / ne) (1 / Z) Msun
+        with Z = z_over_zsun * Zsun
+
+    Returns mass in Msun.
+    """
+    L = np.asarray(luminosity_erg_s, dtype=float)
+    ne = np.asarray(ne_cm3, dtype=float)
+
+    out = np.full(np.broadcast(L, ne).shape, np.nan, dtype=float)
+    good = np.isfinite(L) & np.isfinite(ne) & (L > 0) & (ne > 0)
+
+    if not np.any(good):
+        return out
+
+    if line_id == "hbeta":
+        out[good] = 7.2e8 * (L[good] / 1.0e43) * (100.0 / ne[good])
+
+    elif line_id == "halpha":
+        out[good] = 2.5e8 * (L[good] / 1.0e43) * (100.0 / ne[good])
+
+    elif line_id == "oiii5007":
+        zfac = float(z_over_zsun) if np.isfinite(z_over_zsun) and (z_over_zsun > 0) else 1.0
+        out[good] = 4.0e7 * (L[good] / 1.0e44) * (1000.0 / ne[good]) * (1.0 / zfac)
+
+    else:
+        raise ValueError(f"Unsupported line_id={line_id}")
+
+    return out
+
+
+def mass_outflow_rate_msun_per_yr(mass_msun, velocity_kms, delta_r_kpc):
+    """
+    dot(M) = M * v / DeltaR
+    """
+    M = np.asarray(mass_msun, dtype=float) * u.Msun
+    v = np.asarray(velocity_kms, dtype=float) * (u.km / u.s)
+    dR = np.asarray(delta_r_kpc, dtype=float) * u.kpc
+
+    out = np.full(np.broadcast(np.asarray(mass_msun, float),
+                               np.asarray(velocity_kms, float),
+                               np.asarray(delta_r_kpc, float)).shape,
+                  np.nan, dtype=float)
+
+    good = np.isfinite(M.value) & np.isfinite(v.value) & np.isfinite(dR.value) & (M.value > 0) & (v.value > 0) & (dR.value > 0)
+    if np.any(good):
+        out[good] = ((M[good] * v[good] / dR[good]).to(u.Msun / u.yr)).value
+    return out
+
+
+def kinetic_power_erg_s(mdot_msun_yr, velocity_kms):
+    mdot = np.asarray(mdot_msun_yr, dtype=float) * (u.Msun / u.yr)
+    v = np.asarray(velocity_kms, dtype=float) * (u.km / u.s)
+
+    out = np.full(np.broadcast(np.asarray(mdot_msun_yr, float),
+                               np.asarray(velocity_kms, float)).shape,
+                  np.nan, dtype=float)
+
+    good = np.isfinite(mdot.value) & np.isfinite(v.value) & (mdot.value > 0) & (v.value > 0)
+    if np.any(good):
+        out[good] = (0.5 * mdot[good].to(u.g / u.s) * v[good].to(u.cm / u.s)**2).to(u.erg / u.s).value
+    return out
+
+
+def momentum_rate_dyne(mdot_msun_yr, velocity_kms):
+    mdot = np.asarray(mdot_msun_yr, dtype=float) * (u.Msun / u.yr)
+    v = np.asarray(velocity_kms, dtype=float) * (u.km / u.s)
+
+    out = np.full(np.broadcast(np.asarray(mdot_msun_yr, float),
+                               np.asarray(velocity_kms, float)).shape,
+                  np.nan, dtype=float)
+
+    good = np.isfinite(mdot.value) & np.isfinite(v.value) & (mdot.value > 0) & (v.value > 0)
+    if np.any(good):
+        out[good] = (mdot[good].to(u.g / u.s) * v[good].to(u.cm / u.s)).to(u.dyne).value
+    return out
+
+
+def build_outflow_energetics_profile(
+    *,
+    cube_data,
+    center_xy,
+    rmin_pix,
+    rmax_pix,
+    n_shells,
+    arcsec_per_pix,
+    scale_kpc_per_arcsec,
+    dv_kms,
+    lambda_obs_angstrom,
+    luminosity_distance_mpc,
+    velocity_profile,
+    ne_shell,
+    line_id,
+    z_over_zsun=1.0,
+    extra_mask=None,
+    flux_unit_scale=1.0,
+):
+    """
+    Build a shell-by-shell energetics profile for one lobe.
+    """
+    r_edges_pix = radial_shell_edges_pix(rmin_pix, rmax_pix, n_shells)
+    shell_masks = radial_shell_masks_yx(
+        shape_yx=cube_data.shape[1:],
+        center_xy=center_xy,
+        r_edges_pix=r_edges_pix,
+        extra_mask=extra_mask,
+    )
+
+    flux_shell, npix_shell = integrated_line_flux_per_shell_from_cube(
+        cube_data=cube_data,
+        shell_masks=shell_masks,
+        dv_kms=dv_kms,
+        lambda_obs_angstrom=lambda_obs_angstrom,
+        flux_unit_scale=flux_unit_scale,
+    )
+
+    lum_shell = luminosity_from_flux(flux_shell, luminosity_distance_mpc)
+
+    rmid_pix = 0.5 * (r_edges_pix[:-1] + r_edges_pix[1:])
+    dr_pix = (r_edges_pix[1:] - r_edges_pix[:-1])
+
+    rmid_arc = rmid_pix * float(arcsec_per_pix)
+    dr_arc = dr_pix * float(arcsec_per_pix)
+
+    rmid_kpc = rmid_arc * float(scale_kpc_per_arcsec)
+    dr_kpc = dr_arc * float(scale_kpc_per_arcsec)
+
+    vel = np.asarray(velocity_profile["v"], dtype=float)
+    vel_err = np.asarray(velocity_profile.get("v_err", np.full_like(vel, np.nan)), dtype=float)
+
+    n = min(len(rmid_arc), len(dr_arc), len(flux_shell), len(lum_shell), len(ne_shell), len(vel), len(vel_err), len(npix_shell))
+
+    rmid_arc = rmid_arc[:n]
+    dr_arc = dr_arc[:n]
+    rmid_kpc = rmid_kpc[:n]
+    dr_kpc = dr_kpc[:n]
+    flux_shell = flux_shell[:n]
+    lum_shell = lum_shell[:n]
+    ne_shell = np.asarray(ne_shell[:n], dtype=float)
+    vel = vel[:n]
+    vel_err = vel_err[:n]
+    npix_shell = npix_shell[:n]
+
+    mass = ionized_mass_from_luminosity(
+        line_id=line_id,
+        luminosity_erg_s=lum_shell,
+        ne_cm3=ne_shell,
+        z_over_zsun=z_over_zsun,
+    )
+
+    mdot = mass_outflow_rate_msun_per_yr(
+        mass_msun=mass,
+        velocity_kms=vel,
+        delta_r_kpc=dr_kpc,
+    )
+
+    pdot = momentum_rate_dyne(mdot, vel)
+    edot = kinetic_power_erg_s(mdot, vel)
+
+    return {
+        "r_arcsec": rmid_arc,
+        "dr_arcsec": dr_arc,
+        "r_kpc": rmid_kpc,
+        "dr_kpc": dr_kpc,
+        "v_kms": vel,
+        "v_err_kms": vel_err,
+        "flux_erg_s_cm2": flux_shell,
+        "lum_erg_s": lum_shell,
+        "ne_cm3": ne_shell,
+        "mass_msun": mass,
+        "mdot_msun_yr": mdot,
+        "pdot_dyne": pdot,
+        "edot_erg_s": edot,
+        "npix_shell": npix_shell,
+    }
+
+
+def energetics_profile_to_table(profile_dict):
+    return Table(profile_dict)
+
+
+def save_energetics_table_fits(profile_dict, filename):
+    cols = []
+
+    def _add_col(name, key):
+        if key in profile_dict:
+            arr = np.asarray(profile_dict[key], dtype=np.float32)
+            if arr.ndim == 1:
+                cols.append(fits.Column(name=name, format="E", array=arr))
+
+    _add_col("R_ARCSEC", "r_arcsec")
+    _add_col("DR_ARCSEC", "dr_arcsec")
+    _add_col("R_KPC", "r_kpc")
+    _add_col("DR_KPC", "dr_kpc")
+
+    _add_col("V_KMS", "v_kms")
+    _add_col("VERR_KMS", "v_err_kms")
+
+    _add_col("FLUX", "flux_erg_s_cm2")
+    _add_col("LUMINOSITY", "lum_erg_s")
+    _add_col("NE_CM3", "ne_cm3")
+    _add_col("M_MSUN", "mass_msun")
+    _add_col("MDOT", "mdot_msun_yr")
+    _add_col("PDOT", "pdot_dyne")
+    _add_col("EDOT", "edot_erg_s")
+    _add_col("NPIX", "npix_shell")
+
+    _add_col("MERR_MSUN", "mass_err_msun")
+    _add_col("MDOT_ERR", "mdot_err_msun_yr")
+    _add_col("PDOT_ERR", "pdot_err_dyne")
+    _add_col("EDOT_ERR", "edot_err_erg_s")
+
+    _add_col("MDOT_LO", "mdot_lo_msun_yr")
+    _add_col("MDOT_HI", "mdot_hi_msun_yr")
+    _add_col("MDOT_MID", "mdot_mid_msun_yr")
+
+    hdu_primary = fits.PrimaryHDU()
+    hdu_table = fits.BinTableHDU.from_columns(cols, name="ENERGETICS")
+
+    if "density_mode" in profile_dict:
+        hdu_table.header["DENSMODE"] = str(profile_dict["density_mode"])
+
+    if "assumed_ne_values_cm3" in profile_dict:
+        vals = np.asarray(profile_dict["assumed_ne_values_cm3"], dtype=float)
+        hdu_table.header["NEGRID"] = ",".join(f"{v:g}" for v in vals)
+
+    fits.HDUList([hdu_primary, hdu_table]).writeto(filename, overwrite=True)
 
 
 

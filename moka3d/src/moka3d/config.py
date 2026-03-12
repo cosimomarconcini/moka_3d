@@ -38,6 +38,8 @@ class InputConfig:
     cube_file: str
     sn_map: Optional[str] = None
     save_all_outputs: bool = False
+    ne_map: Optional[str] = None
+    ne_outflow: Optional[List[float]] = None
 
 
 @dataclass
@@ -159,8 +161,16 @@ class AdvancedConfig:
     do_final_combined_model_plot: bool = True
     outflow_axis_sign: int = 1
     resid_ranges: List[float] = field(default_factory=lambda: [0.15, 55, 55])
+
     compute_escape_fraction: bool = False
     save_escape_fraction_table: bool = True
+
+    compute_energetics: bool = False
+    save_energetics_table: bool = True
+    assumed_ne_values: List[float] = field(default_factory=lambda: [100.0, 500.0, 1000.0])
+    oiii_metallicity_z_over_zsun: float = 1.0
+
+
 
 
 @dataclass
@@ -341,6 +351,31 @@ def validate_config(cfg: AppConfig) -> None:
         if not sn_path.exists():
             raise FileNotFoundError(f"SN map not found: {sn_path}")
 
+
+    if cfg.input.ne_map is not None:
+        ne_path = cfg.paths.ancillary_dir / cfg.input.ne_map
+        if not ne_path.exists():
+            raise FileNotFoundError(f"Density map not found: {ne_path}")
+
+    if cfg.input.ne_outflow is not None:
+        if not isinstance(cfg.input.ne_outflow, list):
+            raise ValueError("input.ne_outflow must be null or a list of density values.")
+        if len(cfg.input.ne_outflow) < 1:
+            raise ValueError("input.ne_outflow cannot be an empty list.")
+        if any(float(x) <= 0 for x in cfg.input.ne_outflow):
+            raise ValueError("All values in input.ne_outflow must be > 0.")
+
+    if not isinstance(cfg.advanced.assumed_ne_values, list) or len(cfg.advanced.assumed_ne_values) < 1:
+        raise ValueError("advanced.assumed_ne_values must be a non-empty list.")
+
+    if any(float(x) <= 0 for x in cfg.advanced.assumed_ne_values):
+        raise ValueError("All values in advanced.assumed_ne_values must be > 0.")
+
+    if float(cfg.advanced.oiii_metallicity_z_over_zsun) <= 0:
+        raise ValueError("advanced.oiii_metallicity_z_over_zsun must be > 0.")
+
+
+
     # --------------------------------
     # Disc config checks
     # --------------------------------
@@ -441,7 +476,15 @@ def validate_config(cfg: AppConfig) -> None:
         raise ValueError("fit.outflow.opening_deg must be in the range (0, 180].")
 
 
+    fit_bicone = (str(out.mask_mode).lower() == "bicone") or bool(out.double_cone)
 
-
-
+    if cfg.fit.component_mode in {"outflow", "disk_then_outflow"} and cfg.input.ne_outflow is not None:
+        if fit_bicone and len(cfg.input.ne_outflow) != 2:
+            raise ValueError(
+                "For bicone outflow, input.ne_outflow must contain two values: [ne_plus, ne_minus]."
+            )
+        if (not fit_bicone) and len(cfg.input.ne_outflow) != 1:
+            raise ValueError(
+                "For single-cone outflow, input.ne_outflow must contain one value: [ne_single]."
+            )
 

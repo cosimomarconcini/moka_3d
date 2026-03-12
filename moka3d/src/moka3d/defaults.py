@@ -16,6 +16,9 @@ input:
   cube_file: NGC7582_test_OIII_smooth.fits
   sn_map: SN_map_NGC7582.fits
   save_all_outputs: false
+  ne_map: null
+  ne_outflow: null
+
 
 target:
   agn_ra: '23h18m23.6280s'
@@ -122,6 +125,11 @@ advanced:
   resid_ranges: [0.15, 55, 55]
   compute_escape_fraction: false
   save_escape_fraction_table: true
+  compute_energetics: false
+  save_energetics_table: true
+  assumed_ne_values: [100.0, 500.0, 1000.0]
+  oiii_metallicity_z_over_zsun: 1.0
+
 
 output:
   save_plots: true
