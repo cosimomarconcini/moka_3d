@@ -15,10 +15,12 @@ dependencies:
   - tzdata==2026a
   - pip==26.0.1
   - xz==5.6.4
+  - pydantic
   - bzip2==1.0.8
   - sqlite==3.50.2
   - wheel==0.45.1
   - zlib==1.2.13
   - ncurses==6.5
   - python_abi==3.13=0_cp313
+
 prefix: /Users/cosimo/opt/anaconda3/envs/moka3d_env
