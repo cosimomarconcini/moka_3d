@@ -53,9 +53,22 @@ class utils():
     def findrange(self, x):    
         """find step and range in axis """
         
-        if (x[1]-x[0]) == 0.025: decimal = 3 # necessary for MUSE NFM
-        elif(int(x[1]-x[0]) == 39): decimal = 0  #ALMA vel array
-        else: decimal = 2
+        dx0 = x[1] - x[0]
+        if not np.isfinite(dx0):
+            finite_dx = (x[1:] - x[:-1])[np.isfinite(x[1:] - x[:-1])]
+            if finite_dx.size == 0:
+                raise ValueError("Axis spacing is all NaN/non-finite; cannot determine range.")
+            dx0 = finite_dx[0]
+
+        if np.isclose(dx0, 0.025):
+            decimal = 3
+        elif np.isclose(dx0, 39.0):
+            decimal = 0
+        else:
+            decimal = 2
+
+
+
         xstep = np.unique(np.round(x[1:]-x[:-1], decimals=decimal))
         if xstep.size !=1:
             sys.exit('step non uniform')
@@ -1384,11 +1397,45 @@ def pick_center(wcs2d, obscube, vel_kms, agn_ra, agn_dec, center_mode, center_xy
             raise ValueError("center_xy_manual is set -> set agn_ra=None, agn_dec=None and center_mode=None.")
 
     if use_world_center:
-        if isinstance(agn_ra, str) or isinstance(agn_dec, str):
+        if isinstance(agn_ra, str):
             agn_coords = SkyCoord(agn_ra, agn_dec, unit=(u.hourangle, u.deg))
         else:
             agn_coords = SkyCoord(ra=float(agn_ra) * u.deg, dec=float(agn_dec) * u.deg)
-        x_pix, y_pix = wcs2d.world_to_pixel(agn_coords)
+
+        w = wcs2d.celestial if hasattr(wcs2d, "celestial") else wcs2d
+
+        # ---------------------------------------------------------
+        # Check whether the WCS is usable for RA/Dec -> pixel conversion
+        # ---------------------------------------------------------
+        w_naxis = getattr(w, "naxis", None)
+        w_has_celestial = getattr(w, "has_celestial", False)
+
+        if (w is None) or (w_naxis is None) or (w_naxis < 2) or (not w_has_celestial):
+            raise RuntimeError(
+                "Your target has an empty or invalid celestial WCS, so the center cannot "
+                "be defined from RA/Dec coordinates. Set agn_ra: null and dec_ra: null, then "
+                "use another method to define the center: either provide pixel coordinates "
+                "with center_xy_manual (e.g. [x_cen, y_cen] or choose a different center_mode (either flux or kinematic)."
+            )
+
+        try:
+           x_pix, y_pix = w.world_to_pixel(agn_coords)
+        except Exception:
+            try:
+                x_pix, y_pix = w.world_to_pixel_values(
+                    agn_coords.ra.deg,
+                    agn_coords.dec.deg
+                )
+            except Exception as e2:
+                raise RuntimeError(
+                    "Your target has an unusable celestial WCS, so the center cannot "
+                    "be defined from RA/Dec coordinates. "
+                    "Use another method to define the center: either provide pixel coordinates "
+                    "with center_xy_manual or choose a different center_mode."
+                ) from e2
+
+       
+
         return float(x_pix), float(y_pix), np.nan, np.nan, "world"
 
     if center_mode is None:
@@ -1708,8 +1755,6 @@ def apply_sn_mask_to_cube(obscube, sn_fits_path, SN_map, sn_thresh):
     mask2d = (~np.isfinite(sn2d)) | (sn2d < sn_thresh)
 
     obscube[:, mask2d] = np.nan
-
-    logger.info("SN mask applied (threshold=%.2f)", sn_thresh)
 
     return obscube
 
@@ -2768,7 +2813,7 @@ def plot_kin_maps_3x3(
                 ax[i][j].scatter(0.0, 0.0, s=200, marker='*', color='black', zorder=6)
 
     # ---------- titles/labels ----------
-    ax[0][0].set_title(r'log Flux', fontsize=30)
+    ax[0][0].set_title(r'Log Flux', fontsize=30)
     ax[0][1].set_title(r'Mom-1 (km s$^{-1}$)', fontsize=30)
     ax[0][2].set_title(r'Mom-2 (km s$^{-1}$)', fontsize=30)
 
@@ -5694,6 +5739,34 @@ def inspect_percentiles_at(beta, v, *, perc=(0.01, 0.99),
 ################################################################################################################
 #%% Function for the Novello fitting part only
 
+def _describe_missing_pixscale_header_info(obshead) -> str:
+    """
+    Build a human-readable message describing which WCS/header keywords
+    relevant for pixel scale are missing.
+    """
+    keys_to_check = [
+        "CTYPE1", "CTYPE2",
+        "CUNIT1", "CUNIT2",
+        "CDELT1", "CDELT2",
+        "CD1_1", "CD1_2", "CD2_1", "CD2_2",
+        "PC1_1", "PC1_2", "PC2_1", "PC2_2",
+    ]
+
+    missing = []
+    present = []
+
+    for k in keys_to_check:
+        if k in obshead and obshead[k] not in (None, ""):
+            present.append(f"{k}={obshead[k]}")
+        else:
+            missing.append(k)
+
+    msg = []
+    msg.append("Pixel scale could not be determined from the FITS header/WCS.")
+    msg.append("Relevant spatial-WCS keywords present: " + (", ".join(present) if present else "none"))
+    msg.append("Relevant spatial-WCS keywords missing: " + (", ".join(missing) if missing else "none"))
+
+    return "\n".join(msg)
 
 def apply_spatial_mask_to_cube(cube_spec_yx, mask_yx, mode="zero"):
     """

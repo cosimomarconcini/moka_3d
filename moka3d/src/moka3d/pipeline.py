@@ -166,6 +166,30 @@ def _plot_mask_preview(
 
 
 
+def _resolve_display_range(data, cfg_range, positive_mask=None):
+    arr = np.asarray(data, dtype=float)
+
+    if positive_mask is not None:
+        arr = arr[positive_mask]
+    else:
+        arr = arr[np.isfinite(arr)]
+
+    if arr.size == 0:
+        return [np.nan, np.nan]
+
+    mode = str(cfg_range.mode).lower()
+    values = list(cfg_range.values)
+
+    if len(values) != 2:
+        raise ValueError("Display range 'values' must contain exactly two numbers.")
+
+    if mode == "percentile":
+        return list(np.nanpercentile(arr, values))
+
+    if mode == "fixed":
+        return [float(values[0]), float(values[1])]
+
+    raise ValueError(f"Unsupported display range mode: {cfg_range.mode}")
 
 
 
@@ -302,8 +326,31 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
             cfg.input.sn_map,
             cfg.processing.sn_thresh
         )
+        logger.info("SN mask applied: (threshold=%.0f)", cfg.processing.sn_thresh)
+    else:
+        logger.info("SN masking skipped (sn_thresh=None)")
 
     pixscale = km.pixel_scale_arcsec(wcs_large)
+    pixscale_manual = getattr(cfg.processing, "pixel_scale_arcsec_manual", None)
+
+    if not np.isfinite(pixscale) or pixscale <= 0:
+        if pixscale_manual is not None and np.isfinite(float(pixscale_manual)) and float(pixscale_manual) > 0:
+            pixscale = float(pixscale_manual)
+            logger.warning(
+                "Pixel scale could not be inferred from WCS/header. "
+                "Using manual value from configuration .yaml file: %.4f arcsec/pix",
+               pixscale,
+            )
+        else:
+            hdr_msg = km._describe_missing_pixscale_header_info(obshead)
+            raise RuntimeError(
+                hdr_msg
+                + "\nSet processing.pixel_scale_arcsec_manual in the YAML file "
+                  "(for example 0.2 if that is the correct arcsec/pixel value for your data)."
+            )
+
+
+
     n_spec = int(obshead.get("NAXIS3", 0))
     spec_coord, spec_unit = km.spectral_axis_from_header_general(obshead, n_spec)
 
@@ -372,9 +419,27 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
     xy_AGN = [0.0, 0.0]
 
     pos = np.isfinite(obs.maps["flux"]) & (obs.maps["flux"] > 0)
-    flrange = np.nanpercentile(obs.maps["flux"][pos], cfg.processing.percentile_shown_mom_maps[0])
-    velrange = np.nanpercentile(obs.maps["vel"], cfg.processing.percentile_shown_mom_maps[1])
-    sigrange = np.nanpercentile(obs.maps["sig"], cfg.processing.percentile_shown_mom_maps[2])
+
+
+    flux_pos_mask = np.isfinite(obs.maps["flux"]) & (obs.maps["flux"] > 0)
+
+    flrange = _resolve_display_range(
+        obs.maps["flux"],
+        cfg.processing.display_ranges["flux"],
+        positive_mask=flux_pos_mask,
+    )
+
+    velrange = _resolve_display_range(
+        obs.maps["vel"],
+        cfg.processing.display_ranges["vel"],
+    )
+
+    sigrange = _resolve_display_range(
+        obs.maps["sig"],
+        cfg.processing.display_ranges["sig"],
+    )
+
+
 
     obs.plot_kin_maps(
         flrange=flrange,
@@ -487,6 +552,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
     
     USE_GLOBAL_BETA_DISC = bool(cfg.advanced.use_global_beta_disc)
     DISC_FIT_MODE = str(cfg.fit.disc.mode)
+    DISC_PA_DEG = None if disc_cfg.pa_deg is None else float(disc_cfg.pa_deg)
     disc_phi_range = cfg.advanced.disc_phi_range
     disc_zeta_range = _disc_zeta_range(cfg)
 
@@ -650,13 +716,22 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                 mask_bicone=mask_bicone,
                 output_dir=output_dir,
                 show_plots=cfg.output.show_plots,
-                agn_xy_pix=origin,
-                arcsec_per_pix=arcsec_per_pix,
+                agn_xy_pix =origin,
+                arcsec_per_pix = arcsec_per_pix,
                 xrange=xrange,
                 yrange=yrange,
             )
 
-            _ask_user_to_continue_after_mask_check(mask_preview_path)
+
+            
+            if DISC_PA_DEG is not None:
+                logger.info(
+                        "check_masking_before_fitting=True but disc_pa_deg is fixed: "
+                        "(%.0f deg), so no interactive confirmation is requested.",
+                        float(DISC_PA_DEG),
+                    )
+            else:
+                _ask_user_to_continue_after_mask_check(mask_preview_path)
 
     def _keep_only_mask(cube, keep_mask_yx, mode="nan"):
         """Keep pixels inside keep_mask_yx; mask everything else."""
@@ -1418,7 +1493,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
 
             if num_shells_out <= 1:
                 mm = km._make_single_km_component(
-                    npt=int(npt)*30,
+                    npt=int(npt)*100,
                     geometry="spherical",
                     radius_range=radius_range_model_out,
                     theta_range=theta_out,
@@ -1458,7 +1533,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                         v_arr    = list(np.asarray(b2["v"], float))
 
                 mm = km._make_multishell_component(
-                    npt_total=int(npt)*30,
+                    npt_total=int(npt)*100,
                     n_shells=num_shells_out,
                     geometry="spherical",
                     radius_range_shells=radius_shells_out,
@@ -1650,7 +1725,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                 v_arr_disc    = list(np.asarray(disc_best2_for_plots["v"], float))
 
             m_final = km._make_multishell_component(
-                npt_total=int(npt)*30,
+                npt_total=int(npt)*100,
                 n_shells=num_shells_disc_eff,
                 geometry="cylindrical",
                 radius_range_shells=radius_range_model_disc if num_shells_disc_eff == 1 else radius_shells_disc,
@@ -1684,7 +1759,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                 v_arr_disc    = list(np.asarray(disc_best2_for_plots["v"], float))
 
             m_final = km._make_multishell_component(
-                npt_total=int(npt)*30,
+                npt_total=int(npt)*100,
                 n_shells=num_shells_disc_eff,
                 geometry="cylindrical",
                 radius_range_shells=radius_range_model_disc if num_shells_disc_eff == 1 else radius_shells_disc,
@@ -1718,7 +1793,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         def _build_outflow_lobe(beta_best, v_best, gamma_best):
             if num_shells_out <= 1:
                 mm = km._make_single_km_component(
-                    npt=int(npt)*10,
+                    npt=int(npt)*100,
                     geometry="spherical",
                     radius_range=radius_range_model_out,
                     theta_range=theta_out,
@@ -1742,7 +1817,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                 )
             else:
                 mm = km._make_multishell_component(
-                    npt_total=int(npt)*30,
+                    npt_total=int(npt)*100,
                     n_shells=num_shells_out,
                     geometry="spherical",
                     radius_range_shells=radius_shells_out,
@@ -1908,6 +1983,58 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
 
         ax.errorbar(rmid_arc_D, vD, xerr=xerr_arc_D, yerr=eD,
                     fmt="D-", mfc="white", mec="black", mew=1.5, lw=1.5, capsize=4, label="Disc")
+        ax.errorbar(rmid_arc_O, vP, xerr=xerr_arc_O, yerr=eP,
+                    fmt="o-", mfc="white", mec="black", mew=1.5, lw=1.5, capsize=4, label="Outflow (+)")
+        ax.errorbar(rmid_arc_O, vN, xerr=xerr_arc_O, yerr=eN,
+                    fmt="s-", mfc="white", mec="black", mew=1.5, lw=1.5, capsize=4, label="Outflow (-)")
+
+        ax.set_xlabel(r"Radius [arcsec]", fontsize=14)
+        ax.set_ylabel(r"Velocity [km s$^{-1}$]", fontsize=14)
+        ax.legend(fontsize=12, loc='upper left')
+        ax.grid(alpha=0.2)
+
+        ax.set_xlim(xmin, xmax)
+
+        def a2k(x):
+            return x * float(scale)
+
+        def k2a(x):
+            return x / float(scale)
+
+        secax = ax.secondary_xaxis("top", functions=(a2k, k2a))
+        secax.set_xlabel("Radius [kpc]", fontsize=14)
+        secax.tick_params(axis="both", labelsize=12)
+
+
+        plt.tight_layout()
+        finalize_figure(output_dir / "99_vel_profiles.png", show=cfg.output.show_plots)
+
+
+    # ---- Combined comparison plot: Disc vs Outflow(+) vs Outflow(-) ----
+    if (best_disc_profile is None) and (best_out_pos_profile is not None) and (best_out_neg_profile is not None):
+
+        vP = np.asarray(best_out_pos_profile.get("v", []), float)
+        eP = np.asarray(best_out_pos_profile.get("v_err", np.full_like(vP, np.nan)), float)
+
+        vN = np.asarray(best_out_neg_profile.get("v", []), float)
+        eN = np.asarray(best_out_neg_profile.get("v_err", np.full_like(vN, np.nan)), float)
+
+        edges_pix_O = np.linspace(float(rin_pix_out), float(rout_pix_out), int(num_shells_out) + 1)
+        edges_arc_O = edges_pix_O * arcsec_per_pix
+        rmid_arc_O  = 0.5 * (edges_arc_O[:-1] + edges_arc_O[1:])
+        xerr_arc_O  = 0.5 * (edges_arc_O[1:] - edges_arc_O[:-1])
+
+        rmax_arc = float( radius_range_model_out[1])
+        xmin, xmax = 0.0, rmax_arc
+        pad = 0.02 * (xmax - xmin) if xmax > xmin else 0.1
+        xmin, xmax = max(0.0, xmin), xmax + pad
+
+        fig, ax = plt.subplots(figsize=(6.5, 4.8), dpi=300)
+        ax.xaxis.set_minor_locator(AutoMinorLocator(2))
+        ax.yaxis.set_minor_locator(AutoMinorLocator(2))
+        ax.tick_params(which="minor", length=3)
+        ax.tick_params(axis="both", labelsize=12)
+
         ax.errorbar(rmid_arc_O, vP, xerr=xerr_arc_O, yerr=eP,
                     fmt="o-", mfc="white", mec="black", mew=1.5, lw=1.5, capsize=4, label="Outflow (+)")
         ax.errorbar(rmid_arc_O, vN, xerr=xerr_arc_O, yerr=eN,

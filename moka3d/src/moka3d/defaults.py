@@ -33,10 +33,17 @@ processing:
   nrebin: 1
   xrange: null
   yrange: null
-  percentile_shown_mom_maps:
-    - [1, 99]
-    - [5, 95]
-    - [1, 99]
+  pixel_scale_arcsec_manual: null
+  display_ranges:
+    flux:
+      mode: percentile
+      values: [1, 99]
+    vel:
+      mode: percentile
+      values: [1, 99]
+    sig:
+      mode: percentile
+      values: [1, 99]
   psf_sigma: 1.0
   lsf_sigma: 72.0
   vel_sigma: 0.0

@@ -20,6 +20,12 @@ MaskMode = Literal["single", "bicone"]
 CenterMode = Optional[Literal["flux", "kinematic"]]
 DiscModelMode = Literal["independent", "disk_kepler", "NSC", "Plummer", "disk_arctan"]
 
+
+@dataclass
+class DisplayRangeConfig:
+    mode: Literal["percentile", "fixed"] = "percentile"
+    values: List[float] = field(default_factory=lambda: [1.0, 99.0])
+
 @dataclass
 class PathsConfig:
     data_dir: Path
@@ -36,8 +42,8 @@ class InputConfig:
 
 @dataclass
 class TargetConfig:
-    agn_ra: Optional[str] = None
-    agn_dec: Optional[str] = None
+    agn_ra: Optional[Any] = None
+    agn_dec: Optional[Any] = None
     center_mode: CenterMode = None
     center_xy_manual: Optional[List[int]] = None
     redshift: float = 0.0
@@ -51,15 +57,15 @@ class LineConfig:
 
 @dataclass
 class ProcessingConfig:
-    sn_thresh: float = 3.0
+    sn_thresh: Optional[float] = 3.0
     nrebin: int = 1
     xrange: Optional[List[float]] = None
     yrange: Optional[List[float]] = None
-    percentile_shown_mom_maps: List[List[float]] = field(default_factory=lambda: [[1, 99], [5, 95], [1, 99]])
+    pixel_scale_arcsec_manual: Optional[float] = None
     psf_sigma: float = 1.0
     lsf_sigma: float = 72.0
     vel_sigma: float = 0.0
-    logradius: bool = False
+    display_ranges: dict[str, DisplayRangeConfig] = field(default_factory=dict)
 
 
 @dataclass
@@ -195,6 +201,7 @@ def _as_float_or_none(value: Any) -> Optional[float]:
     return None if value is None else float(value)
 
 
+
 def load_config(path: str | Path) -> AppConfig:
     path = Path(path)
     with path.open("r", encoding="utf-8") as f:
@@ -204,6 +211,35 @@ def load_config(path: str | Path) -> AppConfig:
     disc_raw = fit_raw.get("disc", {})
     out_raw = fit_raw.get("outflow", {})
 
+    # ----------------------------
+    # Processing block
+    # ----------------------------
+    proc_raw = raw.get("processing", {})
+
+    display_ranges_raw = proc_raw.get("display_ranges", {})
+    display_ranges = {
+        k: DisplayRangeConfig(**v)
+        for k, v in display_ranges_raw.items()
+    }
+
+    for key in ["flux", "vel", "sig"]:
+        display_ranges.setdefault(key, DisplayRangeConfig())
+
+    processing = ProcessingConfig(
+        sn_thresh=float(proc_raw.get("sn_thresh", 3.0)) if proc_raw.get("sn_thresh", 3.0) is not None else None,
+        nrebin=int(proc_raw.get("nrebin", 1)),
+        xrange=proc_raw.get("xrange"),
+        yrange=proc_raw.get("yrange"),
+        pixel_scale_arcsec_manual=_as_float_or_none(proc_raw.get("pixel_scale_arcsec_manual")),
+        psf_sigma=float(proc_raw.get("psf_sigma", 1.0)),
+        lsf_sigma=float(proc_raw.get("lsf_sigma", 72.0)),
+        vel_sigma=float(proc_raw.get("vel_sigma", 0.0)),
+        display_ranges=display_ranges,
+    )
+
+    # ----------------------------
+    # Full app config
+    # ----------------------------
     cfg = AppConfig(
         paths=PathsConfig(
             data_dir=_as_path(raw["paths"]["data_dir"]),
@@ -213,7 +249,7 @@ def load_config(path: str | Path) -> AppConfig:
         input=InputConfig(**raw["input"]),
         target=TargetConfig(**raw["target"]),
         line=LineConfig(**raw["line"]),
-        processing=ProcessingConfig(**raw.get("processing", {})),
+        processing=processing,
         maps=MapsConfig(**raw.get("maps", {})),
         fit=FitConfig(
             component_mode=fit_raw.get("component_mode", "disk_then_outflow"),
@@ -226,29 +262,39 @@ def load_config(path: str | Path) -> AppConfig:
                 beta_grid_deg=_as_float_list(disc_raw.get("beta_grid_deg", [50, 100, 5])),
 
                 independent=DiscIndependentConfig(
-                    v_grid_kms=_as_float_list(disc_raw.get("independent", {}).get("v_grid_kms", [0.0, 500.0, 10.0]))
+                    v_grid_kms=_as_float_list(
+                        disc_raw.get("independent", {}).get("v_grid_kms", [0.0, 500.0, 10.0])
+                    )
                 ),
 
                 kepler=DiscKeplerConfig(
-                    mbh_grid_msun=_as_float_list(disc_raw.get("kepler", {}).get("mbh_grid_msun", [1.0e6, 1.0e11])),
+                    mbh_grid_msun=_as_float_list(
+                        disc_raw.get("kepler", {}).get("mbh_grid_msun", [1.0e6, 1.0e11])
+                    ),
                     n_geom=_as_int(disc_raw.get("kepler", {}).get("n_geom", 50)),
                 ),
 
                 nsc=DiscNSCConfig(
                     re_pc=float(disc_raw.get("nsc", {}).get("re_pc", 5.0)),
-                    a_grid=_as_float_list(disc_raw.get("nsc", {}).get("a_grid", [1.0e-3, 1.0e3])),
+                    a_grid=_as_float_list(
+                        disc_raw.get("nsc", {}).get("a_grid", [1.0e-3, 1.0e3])
+                    ),
                     n_geom=_as_int(disc_raw.get("nsc", {}).get("n_geom", 50)),
                 ),
 
                 plummer=DiscPlummerConfig(
                     a_pc=float(disc_raw.get("plummer", {}).get("a_pc", 4.0)),
-                    m0_grid_msun=_as_float_list(disc_raw.get("plummer", {}).get("m0_grid_msun", [1.0e6, 1.0e11])),
+                    m0_grid_msun=_as_float_list(
+                        disc_raw.get("plummer", {}).get("m0_grid_msun", [1.0e6, 1.0e11])
+                    ),
                     n_geom=_as_int(disc_raw.get("plummer", {}).get("n_geom", 50)),
                 ),
 
                 arctan=DiscArctanConfig(
                     rt_arcsec=_as_float_or_none(disc_raw.get("arctan", {}).get("rt_arcsec", None)),
-                    vmax_grid_kms=_as_float_list(disc_raw.get("arctan", {}).get("vmax_grid_kms", [0.0, 500.0, 10.0])),
+                    vmax_grid_kms=_as_float_list(
+                        disc_raw.get("arctan", {}).get("vmax_grid_kms", [0.0, 500.0, 10.0])
+                    ),
                 ),
             ),
 
@@ -262,8 +308,6 @@ def load_config(path: str | Path) -> AppConfig:
                 beta_grid_deg=_as_float_list(out_raw.get("beta_grid_deg", [50, 130, 5])),
                 v_grid_kms=_as_float_list(out_raw.get("v_grid_kms", [100.0, 1300.0, 20.0])),
             ),
-
-
         ),
         advanced=AdvancedConfig(**raw.get("advanced", {})),
         output=OutputConfig(**raw.get("output", {})),
@@ -271,6 +315,7 @@ def load_config(path: str | Path) -> AppConfig:
 
     validate_config(cfg)
     return cfg
+
 
 
 
