@@ -3,7 +3,7 @@
    MOKA<sup>3D</sup>
 </h1>
 
-MOKA3D is a Python code for 3D kinematic modeling of emission-line gas in galaxies, designed to analyze integral-field spectroscopy data cubes.
+MOKA<sup>3D</sup> is a Python code for 3D kinematic modeling of emission-line gas in galaxies, designed to analyze integral-field spectroscopy data cubes.
 
 The code reconstructs gas kinematics directly in the data cube space, comparing observed and modeled spectral profiles to constrain the velocity structure of ionized gas.
 
@@ -36,13 +36,13 @@ Mar 13 2026 -- Included fit of ALMA data cubes
 ---
         
 # Installation
-I suggest to create a new environment. Fist of all, download in your desired path the environment_moka.yml file in this repo and then install MOKA 3D as explained in the following.
+I suggest to create a new environment. Fist of all, download in your desired path the environment_moka.yml file in this repo and then install MOKA<sup>3D</sup> as explained in the following.
 1) conda env create -f environment_moka.yml
 2) conda activate moka3d_env
 
 
 
-Then, clone the MOKA 3D repository. For now this repo is private, therefore to clone it you will need a personal token, you can do it like this:
+Then, clone the MOKA<sup>3D</sup> repository. For now this repo is private, therefore to clone it you will need a personal token, you can do it like this:
 
 Click your profile picture at the top right --> Settings --> Scroll down the left panel --> Developer settings --> Personal access tokens --> Tokens (classic) --> Generate new token (classic) --> select only 'repo' --> give it a random name --> scroll down and create token --> save token 
 
@@ -58,7 +58,7 @@ Password: the token
 
 ---
 
-# Run MOKA 3D
+# Run MOKA<sup>3D</sup>
 
 Move to the pulled folder:
 
@@ -86,7 +86,7 @@ moka3d run config_moka.yaml
 
 # Attribution
 
-If you use this software for your research, please cite at least [Marconcini+23](https://ui.adsabs.harvard.edu/abs/2023A%26A...677A..58M/abstract), with the following BibTeX entry:
+If you use MOKA<sup>3D</sup> for your research, please cite at least [Marconcini+23](https://ui.adsabs.harvard.edu/abs/2023A%26A...677A..58M/abstract), with the following BibTeX entry:
 
 ```bibtex
 @ARTICLE{2023A&A...677A..58M,
