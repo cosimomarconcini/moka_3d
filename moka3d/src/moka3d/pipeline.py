@@ -268,7 +268,7 @@ def _plot_escape_fraction_profile(
     _draw_one(out_neg_profile, "Outflow (-)")
     _draw_one(out_avg_profile, "Outflow avg")
 
-    ax.axhline(1.0, ls="--", lw=1.2)
+    ax.axhline(1.0, ls="--", lw=1.2, color = 'black')
     ax.set_xlabel(r"Radius [arcsec]", fontsize=14)
     ax.set_ylabel(r"$v_{\rm out}/(v_{\rm esc})$", fontsize=14)
     ax.grid(alpha=0.2)
@@ -556,6 +556,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         psf_sigma_arcsec=cfg.processing.psf_sigma,
         R_data_arcsec=R_int_arcsec,
         R_data_err_arcsec=R_int_err,
+        vel_range = velrange
     )
     finalize_figure(output_dir / "03_PA_estimate.png", show=cfg.output.show_plots)
     if (cfg.fit.component_mode == "disk") and bool(cfg.advanced.check_masking_before_fitting):
@@ -903,6 +904,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                 psf_sigma_arcsec=psf_sigma,
                 R_data_arcsec=R_int_arcsec,
                 R_data_err_arcsec=R_int_err,
+                vel_range = velrange
             )
             logger.info(
                 "DISC PA estimated from moment-1 map: %.1f +/- %.1f deg",

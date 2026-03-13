@@ -1092,9 +1092,21 @@ class model(utils):
 
         
         data = np.vstack([self.vlos_lsf, self.yobs_psf, self.xobs_psf]).T # V, Y, X
+        safe_range = []
+        for r in self.cube["range"]:
+            r0, r1 = float(r[0]), float(r[1])
+            if not np.isfinite(r0) or not np.isfinite(r1):
+                raise ValueError(f"Non-finite histogram range encountered: {r}")
+            if r1 < r0:
+                r0, r1 = r1, r0
+            if r1 == r0:
+                raise ValueError(f"Degenerate histogram range encountered: {r}")
+            safe_range.append([r0, r1])
+
 
         if weights is None:
-            hist, edges = np.histogramdd(data, bins=self.cube['nbins'], range=self.cube['range'])
+
+            hist, edges = np.histogramdd(data, bins=self.cube['nbins'], range=safe_range)
 
             self.cube['hist'] = hist
             self.cube['data'] = hist
@@ -1123,7 +1135,7 @@ class model(utils):
 
         else:      
             # If weight is not None, the clouds are weighted with flux
-            cube, edges = np.histogramdd(data,  bins=self.cube['nbins'], range=self.cube['range'], weights=weights)
+            cube, edges = np.histogramdd(data,  bins=self.cube['nbins'], range=safe_range, weights=weights)
             self.cube['data'] = cube 
             self.cube['nv'], self.cube['ny'], self.cube['nx'] = self.cube['data'].shape
                 
@@ -2252,7 +2264,9 @@ def estimate_pa_from_mom1(
     psf_sigma_arcsec=None,
     use_block_bootstrap=True,
     R_data_arcsec=None,
-    R_data_err_arcsec = None):
+    R_data_err_arcsec = None,
+    vel_range = None,
+     ):
     """
     Estimate kinematic position angle (PA) from a velocity (moment-1) map.
 
@@ -2353,13 +2367,15 @@ def estimate_pa_from_mom1(
         x_arc = (np.arange(nx) - x0) * arcsec_per_pix
         y_arc = (np.arange(ny) - y0) * arcsec_per_pix
         extent_arcsec = [x_arc[0], x_arc[-1], y_arc[0], y_arc[-1]]
+        vmino = np.nanpercentile(vel[mask],1) if vel_range is None else vel_range[0]
+        vmaxo = np.nanpercentile(vel[mask], 99) if vel_range is None else vel_range[1]
 
         plt.figure(figsize=(6.2, 5.4), dpi=150)
         im = plt.imshow(
             vel, origin='lower', cmap='RdBu_r',
             extent=extent_arcsec, interpolation='nearest',
-            vmin=np.nanpercentile(vel[mask], 1),
-            vmax=np.nanpercentile(vel[mask], 99)
+            vmin=vmino,
+            vmax=vmaxo
         )
 
         # Star at apex
