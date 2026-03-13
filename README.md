@@ -81,11 +81,8 @@ moka3d run config_moka.yaml
 
 ---
 
-# Citing MOKA 3D in your work
+# Attribution
 
-If you use this code in your publication please cite the following paper: https://ui.adsabs.harvard.edu/abs/2023A%26A...677A..58M/abstract 
-
-
-
+If you use this software for your research, please cite at least [Marconcini+23](https://ui.adsabs.harvard.edu/abs/2023A%26A...677A..58M/abstract).
 
 
