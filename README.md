@@ -15,7 +15,7 @@ The current set up has been tested for MUSE (WFM, NFM), JWST (MIRI MRS, NIRSpec 
 ---
 
 # History
-Mar 13 2026 -- Included ALMA fit, with frequency axis
+Mar 13 2026 -- Included fit of ALMA data cubes
 
 ---
 
