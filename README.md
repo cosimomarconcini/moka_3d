@@ -10,6 +10,12 @@ Typical applications include:
 - rotating gas discs
 - combined disc + outflow systems
 
+The current set up has been tested for MUSE (WFM, NFM), JWST (MIRI MRS, NIRSpec IFU, SINFONI, ALMA)
+---
+
+# History
+Mar 13 2026 -- Included ALMA fit, with frequency axis
+
 ---
 
 # Features
