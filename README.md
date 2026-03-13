@@ -1,6 +1,6 @@
 <h1>
   <img src="logo.png" width="100" height ="100">
-  # MOKA 3D
+   MOKA 3D
 </h1>
 
 MOKA3D is a Python code for 3D kinematic modeling of emission-line gas in galaxies, designed to analyze integral-field spectroscopy data cubes.
