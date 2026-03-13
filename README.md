@@ -85,8 +85,6 @@ moka3d run config_moka.yaml
 
 If you use this software for your research, please cite at least [Marconcini+23](https://ui.adsabs.harvard.edu/abs/2023A%26A...677A..58M/abstract), with the following BibTeX entry:
 
-### BibTeX
-
 ```bibtex
 @ARTICLE{2023A&A...677A..58M,
        author = {{Marconcini}, C. and {Marconi}, A. and {Cresci}, G. and {Venturi}, G. and {Ulivi}, L. and {Mannucci}, F. and {Belfiore}, F. and {Tozzi}, G. and {Ginolfi}, M. and {Marasco}, A. and {Carniani}, S. and {Amiri}, A. and {Di Teodoro}, E. and {Scialpi}, M. and {Tomicic}, N. and {Mingozzi}, M. and {Brazzini}, M. and {Moreschini}, B.},
