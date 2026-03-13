@@ -5,7 +5,7 @@
 
 MOKA<sup>3D</sup> is a Python code for 3D kinematic modeling of emission-line gas in galaxies, designed to analyze integral-field spectroscopy data cubes.
 
-The code reconstructs gas kinematics directly in the data cube space, comparing observed and modeled spectral profiles to constrain the velocity structure of ionized gas.
+The code reconstructs gas kinematics directly in the data cube space, comparing observed and modeled spectral profiles to constrain the velocity structure of the gas.
 
 Typical applications include:
 
