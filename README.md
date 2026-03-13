@@ -11,6 +11,7 @@ Typical applications include:
 - combined disc + outflow systems
 
 The current set up has been tested for MUSE (WFM, NFM), JWST (MIRI MRS, NIRSpec IFU, SINFONI, ALMA)
+
 ---
 
 # History
