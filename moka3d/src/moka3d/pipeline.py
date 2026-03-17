@@ -1529,14 +1529,14 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
 
         if fit_bicone:
             logger.info(
-                "OUTFLOW bicone mode: fitting both lobes (PA=%.1f deg and %.1f deg, opening=%.1f deg)",
+                "OUTFLOW bicone mode: fitting both lobes (PA=%.1f deg and %.1f deg, aperture=%.1f deg)",
                 OUTFLOW_PA_DEG,
                 gamma_neg,
                 OUTFLOW_OPENING_DEG,
             )
 
             logger.info(
-                "OUTFLOW lobe +: PA=%.1f deg, opening=%.1f deg",
+                "OUTFLOW lobe +: PA=%.1f deg, aperture=%.1f deg",
                 OUTFLOW_PA_DEG,
                 OUTFLOW_OPENING_DEG,
             )
@@ -1547,7 +1547,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
             )
 
             logger.info(
-                "OUTFLOW lobe -: PA=%.1f deg, opening=%.1f deg",
+                "OUTFLOW lobe -: PA=%.1f deg, aperture =%.1f deg",
                 gamma_neg,
                 OUTFLOW_OPENING_DEG,
             )
@@ -1560,7 +1560,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         else:
             if OUTFLOW_AXIS_SIGN >= 0:
                 logger.info(
-                    "OUTFLOW single-cone mode: fitting only lobe + (PA=%.1f deg, opening=%.1f deg)",
+                    "OUTFLOW single-cone mode: fitting only lobe + (PA=%.1f deg, aperture=%.1f deg)",
                     OUTFLOW_PA_DEG,
                     OUTFLOW_OPENING_DEG,
                 )
@@ -1575,7 +1575,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
 
             else:
                 logger.info(
-                    "OUTFLOW single-cone mode: fitting only lobe - (PA=%.1f deg, opening=%.1f deg)",
+                    "OUTFLOW single-cone mode: fitting only lobe - (PA=%.1f deg, aperture=%.1f deg)",
                     gamma_neg,
                     OUTFLOW_OPENING_DEG,
                 )
