@@ -19,6 +19,7 @@ FitMode = Literal["disk", "outflow", "disk_then_outflow"]
 MaskMode = Literal["single", "bicone"]
 CenterMode = Optional[Literal["flux", "kinematic"]]
 DiscModelMode = Literal["independent", "disk_kepler", "NSC", "Plummer", "disk_arctan"]
+DopplerConvention = Optional[Literal["radio", "optical", "relativistic"]]
 
 
 @dataclass
@@ -55,6 +56,7 @@ class TargetConfig:
 class LineConfig:
     wavelength_line: float
     wavelength_line_unit: str = "Angstrom"
+    doppler_convention: DopplerConvention = None
 
 
 @dataclass
@@ -342,6 +344,9 @@ def validate_config(cfg: AppConfig) -> None:
     if cfg.processing.nrebin < 1:
         raise ValueError("processing.nrebin must be >= 1.")
 
+    if cfg.line.doppler_convention not in {None, "radio", "optical", "relativistic"}:
+        raise ValueError("line.doppler_convention must be null, 'radio', 'optical', or 'relativistic'.")
+
     cube_path = cfg.paths.data_dir / cfg.input.cube_file
     if not cube_path.exists():
         raise FileNotFoundError(f"Cube file not found: {cube_path}")
@@ -487,4 +492,3 @@ def validate_config(cfg: AppConfig) -> None:
             raise ValueError(
                 "For single-cone outflow, input.ne_outflow must contain one value: [ne_single]."
             )
-

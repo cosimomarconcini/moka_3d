@@ -394,10 +394,9 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
     if flux_unit_scale is None:
         logger.warning(
             "Could not parse BUNIT from the input FITS header. "
-            "Energetics will assume the cube is already in erg s^-1 cm^-2 Angstrom^-1. "
-            "This may cause an order-of-magnitude unit error in the energetics calculation."
+            "Physical energetics will be skipped because the cube cannot be converted "
+            "safely to erg s^-1 cm^-2 Angstrom^-1."
         )
-        flux_unit_scale = 1.0
     else:
         logger.info(
             "Energetics flux-unit scale factor derived from BUNIT = %.6e",
@@ -439,6 +438,9 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
 
     n_spec = int(obshead.get("NAXIS3", 0))
     spec_coord, spec_unit = km.spectral_axis_from_header_general(obshead, n_spec)
+    doppler_convention = getattr(cfg.line, "doppler_convention", None)
+    if doppler_convention is None:
+        doppler_convention = "radio" if spec_unit.is_equivalent(u.Hz) else "optical"
 
     vel_kms_approx, spec_kind, line_obs = km.velocity_axis_from_spectral_coord(
         spec_coord,
@@ -446,7 +448,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         line_value=cfg.line.wavelength_line,
         line_unit=cfg.line.wavelength_line_unit,
         redshift=cfg.target.redshift,
-        convention="optical",
+        convention=doppler_convention,
     )
 
     obscube, _ = km.standardize_cube_to_spec_yx(obscube, n_spec=len(vel_kms_approx))
@@ -1304,7 +1306,6 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
     if FIT_COMPONENT_MODE == "disk_then_outflow":
         if disc_cube_for_outflow is None:
             raise RuntimeError("disc_cube_for_outflow is None: cannot fit outflow in disk_then_outflow mode.")
-        km.set_fit_context(disc_cube=disc_cube_for_outflow)
 
 
     obs_out_pos = None
@@ -1325,7 +1326,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
     out_best2_pos = None
     out_best2_neg = None
 
-    def _run_single_lobe_outflow_fit(*, obs_lobe, pa_deg, label):
+    def _run_single_lobe_outflow_fit(*, obs_lobe, pa_deg, label, disc_cube_for_fit=None):
         """Run gridsearch + all diagnostics for one lobe; returns (fit_dict, model_best, best2_for_plots)."""
         safe_label = (
             label.lower()
@@ -1337,7 +1338,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         )
         fit = km.fit_gridsearch_component(
             obs_for_fit=obs_lobe,
-            disc_cube=None,
+            disc_cube=disc_cube_for_fit,
             vel_axis=vel,
             origin=origin,
             pixscale=pixscale,
@@ -1521,6 +1522,8 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
 
     if FIT_COMPONENT_MODE in ("outflow", "disk_then_outflow"):
 
+        outflow_disc_cube = disc_cube_for_outflow if FIT_COMPONENT_MODE == "disk_then_outflow" else None
+
         if FIT_COMPONENT_MODE == "outflow":
             km.set_fit_context(disc_cube=None)
 
@@ -1543,7 +1546,8 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
             outflow_fit_pos, model_outflow_pos_best, out_best2_pos = _run_single_lobe_outflow_fit(
                 obs_lobe=obs_out_pos,
                 pa_deg=OUTFLOW_PA_DEG,
-                label="OUTFLOW (+)"
+                label="OUTFLOW (+)",
+                disc_cube_for_fit=outflow_disc_cube,
             )
 
             logger.info(
@@ -1554,7 +1558,8 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
             outflow_fit_neg, model_outflow_neg_best, out_best2_neg = _run_single_lobe_outflow_fit(
                 obs_lobe=obs_out_neg,
                 pa_deg=gamma_neg,
-                label="OUTFLOW (-)"
+                label="OUTFLOW (-)",
+                disc_cube_for_fit=outflow_disc_cube,
             )
 
         else:
@@ -1567,7 +1572,8 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                 outflow_fit_pos, model_outflow_pos_best, out_best2_pos = _run_single_lobe_outflow_fit(
                     obs_lobe=obs_out_pos,
                     pa_deg=OUTFLOW_PA_DEG,
-                    label="OUTFLOW (+)"
+                    label="OUTFLOW (+)",
+                    disc_cube_for_fit=outflow_disc_cube,
                 )
                 outflow_fit_neg = None
                 model_outflow_neg_best = None
@@ -1582,7 +1588,8 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                 outflow_fit_neg, model_outflow_neg_best, out_best2_neg = _run_single_lobe_outflow_fit(
                     obs_lobe=obs_out_neg,
                     pa_deg=gamma_neg,
-                    label="OUTFLOW (-)"
+                    label="OUTFLOW (-)",
+                    disc_cube_for_fit=outflow_disc_cube,
                 )
                 outflow_fit_pos = None
                 model_outflow_pos_best = None
@@ -2222,6 +2229,12 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                     "Skipping energetics calculation. This is still work in progress.",
                     float(cfg.line.wavelength_line),
                     str(cfg.line.wavelength_line_unit),
+                )
+            elif flux_unit_scale is None:
+                logger.warning(
+                    "compute_energetics=True but FITS BUNIT=%r is missing, malformed, or unsupported. "
+                    "Skipping physical energetics calculation because no safe flux-unit conversion is available.",
+                    bunit_header,
                 )
             else:
                 logger.info(
@@ -3189,8 +3202,5 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         _save_summary(summary, output_dir)
 
     return summary
-
-
-
 
 
