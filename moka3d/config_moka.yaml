@@ -4,12 +4,12 @@ paths:
   output_dir: ./Outputs
 
 input:
-  cube_file: NGC4388_test_OIII.fits
-  sn_map: SN_map_NGC4388_OIII.fits        # null
+  cube_file: NGC7582_test_OIII_smooth.fits
+  sn_map: SN_map_NGC7582.fits       
   save_all_outputs: true
 
   ne_map: null                  # path to 2D FITS density map in ancillary_dir; null if unavailable
-  ne_outflow: [200,200]              # null OR [single_value] OR [ne_plus, ne_minus]
+  ne_outflow: null              # null OR [single_value] OR [ne_plus, ne_minus]
                                 # examples:
                                 # single cone (+): [400]
                                 # single cone (-): [500]
@@ -17,15 +17,15 @@ input:
 
 
 target:
-  agn_ra: 12h25m46.7813s          # takes either degree or hms
-  agn_dec: +12d39m43.761s         # takes either degree or hms
+  agn_ra: 23h18m23.6280s         # takes either degree or hms
+  agn_dec: -42d22m13.512s         # takes either degree or hms
   center_mode: null               #  flux    |  kinematic
   center_xy_manual: null          #  [ x_coord, y_coord ]
-  redshift: 0.008419
+  redshift: 0.005410
 
 line:
   wavelength_line: 5006.8
-  wavelength_line_unit: Angstrom
+  wavelength_line_unit: Angstrom          # Angstrom     |    micron  | GHz  \ 
 
 processing:
   sn_thresh: 3
@@ -46,8 +46,8 @@ processing:
       mode: percentile                # fixed    |    percentile
       values: [1, 99]
 
-  psf_sigma: 1
-  lsf_sigma: 72.0
+  psf_sigma: 0.9
+  lsf_sigma: 70.0
   vel_sigma: 0.0
 maps:
   fluxmap: null
@@ -59,16 +59,16 @@ fit:
   disc:
     mode: independent              # independent | disk_kepler | NSC | Plummer | disk_arctan
 
-    radius_range_arcsec: [0.0, 45]
-    num_shells: 45
+    radius_range_arcsec: [0.0, 50]
+    num_shells: 50
 
     pa_deg: null
     pa_unc_deg: null
 
-    beta_grid_deg: [40, 90, 5]
+    beta_grid_deg: [30, 90, 2]
 
     independent:
-      v_grid_kms: [0.0, 500.0, 25.0]
+      v_grid_kms: [0.0, 400.0, 20.0]
 
     kepler:
       mbh_grid_msun: [1.0e6, 1.0e11]
@@ -90,24 +90,24 @@ fit:
 
 
   outflow:
-    radius_range_arcsec: [0.0, 40]
-    num_shells: 40
-    pa_deg: 160
-    opening_deg: 120
+    radius_range_arcsec: [0.0, 35]
+    num_shells: 35
+    pa_deg: 110
+    opening_deg: 110
     double_cone: true
     mask_mode: bicone
 
-    beta_grid_deg: [60, 130, 10]
-    v_grid_kms: [0.0, 1000.0, 50.0]
+    beta_grid_deg: [60, 130, 5]
+    v_grid_kms: [0.0, 1500.0, 15.0]
 
 advanced:
-  check_masking_before_fitting: false
+  check_masking_before_fitting: true
   use_crps: false
   perc_disc: [0.05, 0.95]
   perc_out: [0.01, 0.99]
   perc_weights: [1, 1]
 
-  npt: 50000
+  npt: 200000
 
   use_global_beta_disc: true
 
@@ -122,7 +122,7 @@ advanced:
   do_final_combined_model_plot: true
   outflow_axis_sign: 1
 
-  resid_ranges: [0.25, 50, 50]
+  resid_ranges: [0.25, 25, 25]
   compute_escape_fraction: true
   save_escape_fraction_table: false
 
