@@ -1,8 +1,8 @@
 # Configuration Guide
 
-The YAML configuration file is the main interface to MOKA3D.
+The YAML configuration file is the main interface to MOKA<sup>3D</sup>.
 
-The MOKA3D YAML file controls what data are read, how the cube is interpreted, which kinematic model is fitted, and which outputs are written. In normal use, you edit the YAML file and then run:
+The MOKA<sup>3D</sup> YAML file controls what data are read, how the cube is interpreted, which kinematic model is fitted, and which outputs are written. In normal use, you edit the YAML file and then run:
 
 ```bash
 moka3d validate config.yaml
@@ -98,7 +98,7 @@ You can think of the configuration as three layers:
 
 ## Paths and inputs
 
-This part tells MOKA3D where to find the data and where to write results.
+This part tells MOKA<sup>3D</sup> where to find the data and where to write results.
 
 ```yaml
 paths:
