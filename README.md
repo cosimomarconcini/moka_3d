@@ -120,7 +120,26 @@ MOKA<sup>3D</sup> is actively evolving. Current limitations include:
 
 ## Citation
 
-If you use MOKA<sup>3D</sup> in scientific work, cite the associated methodological paper and the software release you used. A machine-readable citation file such as `CITATION.cff` should be included in the first public release.
+If you use MOKA<sup>3D</sup> for your research, please cite cite the associated methodological paper [Marconcini+23](https://ui.adsabs.harvard.edu/abs/2023A%26A...677A..58M/abstract), with the following BibTeX entry and the software release you used:
+
+```bibtex
+@ARTICLE{2023A&A...677A..58M,
+       author = {{Marconcini}, C. and {Marconi}, A. and {Cresci}, G. and {Venturi}, G. and {Ulivi}, L. and {Mannucci}, F. and {Belfiore}, F. and {Tozzi}, G. and {Ginolfi}, M. and {Marasco}, A. and {Carniani}, S. and {Amiri}, A. and {Di Teodoro}, E. and {Scialpi}, M. and {Tomicic}, N. and {Mingozzi}, M. and {Brazzini}, M. and {Moreschini}, B.},
+        title = "{MOKA$^{3D}$: An innovative approach to 3D gas kinematic modelling. I. Application to AGN ionised outflows}",
+      journal = {\aap},
+     keywords = {galaxies: Seyfert, galaxies: kinematics and dynamics, galaxies: active, ISM: jets and outflows, Astrophysics - Astrophysics of Galaxies},
+         year = 2023,
+        month = sep,
+       volume = {677},
+          eid = {A58},
+        pages = {A58},
+          doi = {10.1051/0004-6361/202346821},
+archivePrefix = {arXiv},
+       eprint = {2307.01854},
+ primaryClass = {astro-ph.GA},
+       adsurl = {https://ui.adsabs.harvard.edu/abs/2023A&A...677A..58M},
+      adsnote = {Provided by the SAO/NASA Astrophysics Data System}
+}
 
 ## Release Notes
 
