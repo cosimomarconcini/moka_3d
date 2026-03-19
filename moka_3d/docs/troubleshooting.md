@@ -1,6 +1,8 @@
 # Troubleshooting
 
-This page should collect the most common user-facing failure modes and the shortest reliable fixes. It should be practical and symptom-driven.
+## Cosimo: Per il momento io leverei questa sezione. Quando poi le persone cominciano a usare MOKA e capiamo che problemi ci sono comincerei a riempirla con i problemi piu comuni. Al momento mi sembra superflua.
+
+This page collect the most common user-facing failure modes and the shortest reliable fixes.
 
 ## Installation Problems
 
