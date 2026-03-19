@@ -1,6 +1,6 @@
 # Understanding Outputs
 
-MOKA3D writes results to the directory defined by `paths.output_dir` in your YAML configuration.
+MOKA<sup>3D</sup> writes results to the directory defined by `paths.output_dir` in your YAML configuration.
 This is the first place to look after every run.
 
 Each run creates its own output folder, so you can compare runs without overwriting earlier results.
@@ -71,7 +71,7 @@ These plots are usually the fastest way to decide whether a run is usable.
 
 ### Optional FITS products
 
-If `input.save_all_outputs: true`, MOKA3D writes additional FITS files. These are useful when you want to inspect results in detail or reuse them in your own analysis.
+If `input.save_all_outputs: true`, MOKA<sup>3D</sup> writes additional FITS files. These are useful when you want to inspect results in detail or reuse them in your own analysis.
 
 At a high level, these products can include:
 
