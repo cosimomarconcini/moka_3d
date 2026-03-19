@@ -19,5 +19,6 @@ dependencies:
   - typer
   - rich
   - fast-histogram
+  - pytest
   - pip:
       - -e ./moka3d
