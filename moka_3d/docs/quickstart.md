@@ -1,6 +1,6 @@
 # Quickstart
 
-This guide walks you from a fresh clone of the repository to a successful end-to-end run of MOKA3D using the bundled example data.
+This guide walks you from a fresh clone of the repository to a successful end-to-end run of MOKA<sup>3D</sup> using the bundled example data.
 
 ## What you will do
 
