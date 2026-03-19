@@ -1,6 +1,6 @@
-# MOKA3D
+# MOKA<sup>3D</sup>
 
-MOKA3D is a scientific Python package for 3D kinematic modeling of emission-line gas in spectral cubes. It enables fitting of rotating disks, outflows, and combined disk+outflow systems directly in cube space, producing both kinematic diagnostics and derived physical properties.
+MOKA<sup>3D</sup> is a scientific Python package for 3D kinematic modeling of emission-line gas in spectral cubes. It enables fitting of rotating disks, outflows, and combined disk+outflow systems directly in cube space, producing both kinematic diagnostics and derived physical properties.
 
 ## Key Features
 
@@ -112,7 +112,7 @@ This directory contains:
 
 ## Known Limitations
 
-MOKA3D is actively evolving. Current limitations include:
+MOKA<sup>3D</sup> is actively evolving. Current limitations include:
 
 - Runtime can grow substantially with large parameter grids, many shells, and high Monte Carlo sampling.
 - Energetics are limited to supported emission lines and require a valid FITS `BUNIT`.
@@ -120,7 +120,7 @@ MOKA3D is actively evolving. Current limitations include:
 
 ## Citation
 
-If you use MOKA3D in scientific work, cite the associated methodological paper and the software release you used. A machine-readable citation file such as `CITATION.cff` should be included in the first public release.
+If you use MOKA<sup>3D</sup> in scientific work, cite the associated methodological paper and the software release you used. A machine-readable citation file such as `CITATION.cff` should be included in the first public release.
 
 ## Release Notes
 
