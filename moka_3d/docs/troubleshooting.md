@@ -24,7 +24,7 @@ This section should explain how to use `moka3d validate` and how to interpret va
 - Spectral axis is malformed or unsupported.
 - Center coordinates do not match the data.
 
-This section should explain what metadata MOKA3D expects from input cubes and when a manual override is needed.
+This section should explain what metadata MOKA<sup>3D</sup> expects from input cubes and when a manual override is needed.
 
 ## Energetics Problems
 
