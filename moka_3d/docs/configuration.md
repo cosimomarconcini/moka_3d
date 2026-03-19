@@ -178,7 +178,7 @@ Most important fields:
 - `target.redshift`
   This is required. It is used to interpret the spectral axis and derive physical scales.
 - `target.agn_ra`, `target.agn_dec`
-  Use these if you want to center the model on known sky coordinates.
+  Use these if you want to center the model on known sky coordinates. It can either be in hms or degrees.
 - `target.center_mode`
   Common choices are `flux`, `kinematic`, or `null`.
 - `target.center_xy_manual`
