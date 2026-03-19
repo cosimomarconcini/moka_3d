@@ -1,4 +1,4 @@
-# MOKA3D v0.1
+# MOKA<sup>3D</sup> v0.1
 
 Initial public release.
 
