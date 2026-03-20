@@ -16,7 +16,7 @@ The installable Python package lives in the `moka3d/` subdirectory of this repos
 Clone the repository:
 
 ```bash
-git clone https://github.com/cosimomarconcini/moka3d.git
+git clone https://github.com/cosimomarconcini/moka_3d.git
 cd moka3d
 ```
 
@@ -64,7 +64,7 @@ The example configuration uses relative paths such as `./Data`, so you must run 
 Run the example end-to-end:
 
 ```bash
-git clone https://github.com/cosimomarconcini/moka3d.git
+git clone https://github.com/cosimomarconcini/moka_3d.git
 cd moka3d
 python -m pip install -e ./moka3d
 
