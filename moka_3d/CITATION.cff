@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it."
-title: "MOKA3D TBD"
+title: "MOKA3D"
 version: "v0.1"
 authors:
   - given-names: "Cosimo"
@@ -14,5 +14,5 @@ preferred-citation:
       family-names: "Marconcini"
     - given-names: "Alessandro"
       family-names: "Marconi"
-  title: "MOKA3D TBD"
+  title: "MOKA3D"
   year: 2026
