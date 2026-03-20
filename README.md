@@ -147,7 +147,7 @@ archivePrefix = {arXiv},
 
 ## Release Notes
 
-- [MOKA3D v0.1](docs/release_notes_v0.1.md)
+- [MOKA3D v0.1](moka_3d/docs/release_notes_v0.1.md)
 
 
 ## License
