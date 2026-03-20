@@ -15,6 +15,7 @@ import logging
 import shutil
 import warnings
 import copy
+import sys
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -34,11 +35,21 @@ from astropy.io import fits
 logger = logging.getLogger(__name__)
 
 
-            
+ACTION_LEVEL = 25
+logging.addLevelName(ACTION_LEVEL, "ACTION")
+
+def action(self, message, *args, **kwargs):
+    if self.isEnabledFor(ACTION_LEVEL):
+        self._log(ACTION_LEVEL, message, args, **kwargs)
+
+logging.Logger.action = action
+
+
 class ColorFormatter(logging.Formatter):
     COLORS = {
         "DEBUG": "\033[36m",      # cyan
         "INFO": "\033[0m",        # normal
+        "ACTION": "\033[32m",     # green
         "WARNING": "\033[33m",    # yellow
         "ERROR": "\033[31m",      # red
         "CRITICAL": "\033[1;31m", # bright red
@@ -47,9 +58,14 @@ class ColorFormatter(logging.Formatter):
     RESET = "\033[0m"
 
     def format(self, record):
-        color = self.COLORS.get(record.levelname, self.RESET)
-        record.levelname = f"{color}{record.levelname}{self.RESET}"
-        return super().format(record)
+        original_levelname = record.levelname
+        color = self.COLORS.get(original_levelname, self.RESET)
+        record.levelname = f"{color}{original_levelname}{self.RESET}"
+        formatted = super().format(record)
+        record.levelname = original_levelname
+        return formatted
+
+
 
 def _setup_logging(output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -63,12 +79,16 @@ def _setup_logging(output_dir: Path) -> None:
     formatter_console = ColorFormatter("%(asctime)s | %(levelname)s | %(message)s")
 
     fh = logging.FileHandler(log_file, mode="w")
+    fh.setLevel(logging.INFO)
     fh.setFormatter(formatter_file)
     logger.addHandler(fh)
 
     sh = logging.StreamHandler()
+    sh.setLevel(logging.INFO)
     sh.setFormatter(formatter_console)
     logger.addHandler(sh)
+
+
 
 
 def _save_summary(summary: dict, output_dir: Path) -> None:
@@ -81,10 +101,14 @@ def _disc_zeta_range(cfg):
         return [-cfg.processing.psf_sigma / 2.0, cfg.processing.psf_sigma / 2.0]
     raise ValueError(f"Unsupported disc_zeta_range_mode: {cfg.advanced.disc_zeta_range_mode}")
 
+
 def _ask_user_to_continue_after_mask_check(output_path: Path) -> None:
-    print(f"\nMasking preview saved to:\n{output_path}")
-    print("Check the masking figure.")
-    answer = input("Continue with this masking? [y/n]: ").strip().lower()
+    logger.action("Check the masking figure saved to:\n%s", output_path)
+
+    logger.action("Continue with this masking? [y/n]: ")
+    sys.stdout.write("")  # ensures no newline issues
+    answer = input().strip().lower()
+
 
     if answer not in {"y", "yes", "Y"}:
         raise RuntimeError(
@@ -394,9 +418,10 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
     if flux_unit_scale is None:
         logger.warning(
             "Could not parse BUNIT from the input FITS header. "
-            "Physical energetics will be skipped because the cube cannot be converted "
-            "safely to erg s^-1 cm^-2 Angstrom^-1."
+            "Energetics will assume the cube is already in erg s^-1 cm^-2 Angstrom^-1. "
+            "This may cause an order-of-magnitude unit error in the energetics calculation."
         )
+        flux_unit_scale = 1.0
     else:
         logger.info(
             "Energetics flux-unit scale factor derived from BUNIT = %.6e",
@@ -438,9 +463,6 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
 
     n_spec = int(obshead.get("NAXIS3", 0))
     spec_coord, spec_unit = km.spectral_axis_from_header_general(obshead, n_spec)
-    doppler_convention = getattr(cfg.line, "doppler_convention", None)
-    if doppler_convention is None:
-        doppler_convention = "radio" if spec_unit.is_equivalent(u.Hz) else "optical"
 
     vel_kms_approx, spec_kind, line_obs = km.velocity_axis_from_spectral_coord(
         spec_coord,
@@ -448,7 +470,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         line_value=cfg.line.wavelength_line,
         line_unit=cfg.line.wavelength_line_unit,
         redshift=cfg.target.redshift,
-        convention=doppler_convention,
+        convention="optical",
     )
 
     obscube, _ = km.standardize_cube_to_spec_yx(obscube, n_spec=len(vel_kms_approx))
@@ -1306,6 +1328,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
     if FIT_COMPONENT_MODE == "disk_then_outflow":
         if disc_cube_for_outflow is None:
             raise RuntimeError("disc_cube_for_outflow is None: cannot fit outflow in disk_then_outflow mode.")
+        km.set_fit_context(disc_cube=disc_cube_for_outflow)
 
 
     obs_out_pos = None
@@ -1326,7 +1349,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
     out_best2_pos = None
     out_best2_neg = None
 
-    def _run_single_lobe_outflow_fit(*, obs_lobe, pa_deg, label, disc_cube_for_fit=None):
+    def _run_single_lobe_outflow_fit(*, obs_lobe, pa_deg, label):
         """Run gridsearch + all diagnostics for one lobe; returns (fit_dict, model_best, best2_for_plots)."""
         safe_label = (
             label.lower()
@@ -1338,7 +1361,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         )
         fit = km.fit_gridsearch_component(
             obs_for_fit=obs_lobe,
-            disc_cube=disc_cube_for_fit,
+            disc_cube=None,
             vel_axis=vel,
             origin=origin,
             pixscale=pixscale,
@@ -1522,8 +1545,6 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
 
     if FIT_COMPONENT_MODE in ("outflow", "disk_then_outflow"):
 
-        outflow_disc_cube = disc_cube_for_outflow if FIT_COMPONENT_MODE == "disk_then_outflow" else None
-
         if FIT_COMPONENT_MODE == "outflow":
             km.set_fit_context(disc_cube=None)
 
@@ -1546,8 +1567,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
             outflow_fit_pos, model_outflow_pos_best, out_best2_pos = _run_single_lobe_outflow_fit(
                 obs_lobe=obs_out_pos,
                 pa_deg=OUTFLOW_PA_DEG,
-                label="OUTFLOW (+)",
-                disc_cube_for_fit=outflow_disc_cube,
+                label="OUTFLOW (+)"
             )
 
             logger.info(
@@ -1558,8 +1578,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
             outflow_fit_neg, model_outflow_neg_best, out_best2_neg = _run_single_lobe_outflow_fit(
                 obs_lobe=obs_out_neg,
                 pa_deg=gamma_neg,
-                label="OUTFLOW (-)",
-                disc_cube_for_fit=outflow_disc_cube,
+                label="OUTFLOW (-)"
             )
 
         else:
@@ -1572,8 +1591,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                 outflow_fit_pos, model_outflow_pos_best, out_best2_pos = _run_single_lobe_outflow_fit(
                     obs_lobe=obs_out_pos,
                     pa_deg=OUTFLOW_PA_DEG,
-                    label="OUTFLOW (+)",
-                    disc_cube_for_fit=outflow_disc_cube,
+                    label="OUTFLOW (+)"
                 )
                 outflow_fit_neg = None
                 model_outflow_neg_best = None
@@ -1588,8 +1606,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                 outflow_fit_neg, model_outflow_neg_best, out_best2_neg = _run_single_lobe_outflow_fit(
                     obs_lobe=obs_out_neg,
                     pa_deg=gamma_neg,
-                    label="OUTFLOW (-)",
-                    disc_cube_for_fit=outflow_disc_cube,
+                    label="OUTFLOW (-)"
                 )
                 outflow_fit_pos = None
                 model_outflow_pos_best = None
@@ -2229,12 +2246,6 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                     "Skipping energetics calculation. This is still work in progress.",
                     float(cfg.line.wavelength_line),
                     str(cfg.line.wavelength_line_unit),
-                )
-            elif flux_unit_scale is None:
-                logger.warning(
-                    "compute_energetics=True but FITS BUNIT=%r is missing, malformed, or unsupported. "
-                    "Skipping physical energetics calculation because no safe flux-unit conversion is available.",
-                    bunit_header,
                 )
             else:
                 logger.info(
@@ -3202,5 +3213,8 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         _save_summary(summary, output_dir)
 
     return summary
+
+
+
 
 
