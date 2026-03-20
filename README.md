@@ -147,3 +147,8 @@ archivePrefix = {arXiv},
 ## Release Notes
 
 - [MOKA3D v0.1](docs/release_notes_v0.1.md)
+
+
+## License
+This project is licensed under the terms of the MIT license.
+
