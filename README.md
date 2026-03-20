@@ -151,5 +151,4 @@ archivePrefix = {arXiv},
 
 
 ## License
-This project is licensed under the terms of the [GNU General Public License version 3.0]([https://ui.adsabs.harvard.edu/abs/2023A%26A...677A..58M/abstract](https://choosealicense.com/licenses/gpl-3.0/))  
-license.
+This project is licensed under the terms of the [GNU General Public License version 3.0]https://choosealicense.com/licenses/gpl-3.0/)) license.
