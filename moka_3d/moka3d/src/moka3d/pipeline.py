@@ -98,7 +98,8 @@ def _save_summary(summary: dict, output_dir: Path) -> None:
 
 def _disc_zeta_range(cfg):
     if cfg.advanced.disc_zeta_range_mode == "auto_from_psf":
-        return [-cfg.processing.psf_sigma / 2.0, cfg.processing.psf_sigma / 2.0]
+        disc_height = cfg.processing.psf_sigma[0] if len(cfg.processing.psf_sigma)<=1 else max(cfg.processing.psf_sigma)
+        return [-disc_height / 2.0, disc_height / 2.0]
     raise ValueError(f"Unsupported disc_zeta_range_mode: {cfg.advanced.disc_zeta_range_mode}")
 
 
@@ -110,7 +111,7 @@ def _ask_user_to_continue_after_mask_check(output_path: Path) -> None:
     answer = input().strip().lower()
 
 
-    if answer not in {"y", "yes", "Y"}:
+    if answer not in {"y", "yes", "Yes", "Y"}:
         raise RuntimeError(
             "Run stopped by user after masking check. "
             "Edit the YAML file and run again."
@@ -593,7 +594,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         sys.stdout.write("")  # ensures no newline issues
         answer = input().strip().lower()
 
-        if answer not in {"y", "yes", "Y"}:
+        if answer not in {"y", "yes", "Yes", "Y"}:
             raise RuntimeError(
                 "Run stopped by user after PA check. "
                 "Edit the YAML file and run again."
@@ -761,7 +762,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
     # Processing/runtime aliases used throughout the old script
     vel = vel_kms
     nrebin = int(cfg.processing.nrebin)
-    psf_sigma = float(cfg.processing.psf_sigma)
+    psf_sigma = cfg.processing.psf_sigma
     lsf_sigma = float(cfg.processing.lsf_sigma)
     vel_sigma = float(cfg.processing.vel_sigma)
     xrange = cfg.processing.xrange
@@ -1319,9 +1320,9 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                 sigrange=sigrange,
                 resid_ranges=resid_ranges,
                 nticks=4,
-                psf_bmaj=psf_sigma,
-                psf_bmin=psf_sigma,
-                psf_pa=12
+                psf_bmaj=psf_sigma[0] if len(psf_sigma)<=1 else psf_sigma[0],
+                psf_bmin=psf_sigma[0] if len(psf_sigma)<=1 else psf_sigma[1],
+                psf_pa=20 if len(psf_sigma)<=1 else psf_sigma[2]
             )
             finalize_figure(output_dir / "012a_mom_maps_comparison_best_fit.png", show=cfg.output.show_plots)
 
@@ -1772,9 +1773,9 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                 sigrange=sigrange,
                 resid_ranges=resid_ranges,
                 nticks=4,
-                psf_bmaj=psf_sigma,
-                psf_bmin=psf_sigma,
-                psf_pa=12
+                psf_bmaj=psf_sigma[0] if len(psf_sigma)<=1 else psf_sigma[0],
+                psf_bmin=psf_sigma[0] if len(psf_sigma)<=1 else psf_sigma[1],
+                psf_pa=20 if len(psf_sigma)<=1 else psf_sigma[2]
             )
             finalize_figure(output_dir / "012b_mom_maps_comparison_best_fit.png", show=cfg.output.show_plots)
 
@@ -2032,9 +2033,9 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
             sigrange=sigrange,
             resid_ranges=resid_ranges,
             nticks=4,
-            psf_bmaj=psf_sigma,
-            psf_bmin=psf_sigma,
-            psf_pa=12
+            psf_bmaj=psf_sigma[0] if len(psf_sigma)<=1 else psf_sigma[0],
+            psf_bmin=psf_sigma[0] if len(psf_sigma)<=1 else psf_sigma[1],
+            psf_pa=20 if len(psf_sigma)<=1 else psf_sigma[2]
         )
         finalize_figure(output_dir / "012c_mom_maps_comparison_best_fit.png", show=cfg.output.show_plots)
 
