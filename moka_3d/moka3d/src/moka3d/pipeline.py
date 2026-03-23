@@ -294,7 +294,7 @@ def _plot_escape_fraction_profile(
 
     ax.axhline(1.0, ls="--", lw=1.2, color = 'black')
     ax.set_xlabel(r"Radius [arcsec]", fontsize=14)
-    ax.set_ylabel(r"$v_{\rm out}/(v_{\rm esc})$", fontsize=14)
+    ax.set_ylabel(r"$v_{\rm out}/v_{\rm esc}$", fontsize=14)
     ax.grid(alpha=0.2)
     ax.legend(fontsize=11, loc="best")
 
@@ -584,9 +584,14 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
     )
     finalize_figure(output_dir / "03_PA_estimate.png", show=cfg.output.show_plots)
     if (cfg.fit.component_mode == "disk") and bool(cfg.advanced.check_masking_before_fitting):
-        print(f"\nPA estimate preview saved to:\n{output_dir / '03_PA_estimate.png'}")
-        print("Check the PA estimate figure.")
-        answer = input("Continue with this PA estimate? [y/n]: ").strip().lower()
+        #print(f"\nPA estimate preview saved to:\n{output_dir / '03_PA_estimate.png'}")
+        #print("Check the PA estimate figure.")
+        #answer = input("Continue with this PA estimate? [y/n]: ").strip().lower()
+
+        logger.action("PA estimate preview saved to: %s", output_dir)
+        logger.action("Continue with this PA? [y/n]: ")
+        sys.stdout.write("")  # ensures no newline issues
+        answer = input().strip().lower()
 
         if answer not in {"y", "yes", "Y"}:
             raise RuntimeError(
