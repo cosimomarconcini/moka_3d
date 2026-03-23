@@ -7,7 +7,6 @@ input:
   cube_file: NGC7582_test_OIII_smooth.fits
   sn_map: SN_map_NGC7582.fits       
   save_all_outputs: true
-
   ne_map: null                  # path to 2D FITS density map in ancillary_dir; null if unavailable
   ne_outflow: null              # null OR [single_value] OR [ne_plus, ne_minus]
                                 # examples:
@@ -17,7 +16,7 @@ input:
 
 
 target:
-  agn_ra: 23h18m23.6280s         # takes either degree or hms
+  agn_ra: 23h18m23.6280s          # takes either degree or hms
   agn_dec: -42d22m13.512s         # takes either degree or hms
   center_mode: null               #  flux    |  kinematic
   center_xy_manual: null          #  [ x_coord, y_coord ]
@@ -46,7 +45,7 @@ processing:
       mode: percentile                # fixed    |    percentile
       values: [1, 99]
 
-  psf_sigma: 0.42
+  psf_sigma: [0.5]                   # [psf sigma] if simmetric, otherwise [bmaj, bmin, P.A.]
   lsf_sigma: 73.0
   vel_sigma: 0.0
 maps:
@@ -107,7 +106,7 @@ advanced:
   perc_out: [0.01, 0.99]
   perc_weights: [1, 1]
 
-  npt: 150000
+  npt: 200000
 
   use_global_beta_disc: true
 
