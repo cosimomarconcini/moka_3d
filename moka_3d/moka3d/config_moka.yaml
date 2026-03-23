@@ -106,7 +106,7 @@ advanced:
   perc_out: [0.01, 0.99]
   perc_weights: [1, 1]
 
-  npt: 200000
+  npt: 250000
 
   use_global_beta_disc: true
 
@@ -121,7 +121,7 @@ advanced:
   do_final_combined_model_plot: true
   outflow_axis_sign: 1
 
-  resid_ranges: [0.15, 40, 40]
+  resid_ranges: [0.15, 45, 45]
   compute_escape_fraction: true
   save_escape_fraction_table: false
 
