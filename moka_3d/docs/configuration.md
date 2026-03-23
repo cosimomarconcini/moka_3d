@@ -229,7 +229,7 @@ Most important fields:
 - `processing.pixel_scale_arcsec_manual`
   Manual pixel scale override if the FITS WCS is incomplete or unusable.
 - `processing.psf_sigma`
-  Spatial PSF width used in modeling.
+  Spatial PSF width used in modeling. Note that this can either be a single list object (e.g. [0.9] assuming a symmetric PSF or a three list object [bmaj, bmin, P.A.] in case of asymmetric PSF.
 - `processing.lsf_sigma`
   Spectral line-spread width used in modeling.
 - `processing.vel_sigma`
