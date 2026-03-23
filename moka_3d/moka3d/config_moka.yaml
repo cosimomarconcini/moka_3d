@@ -58,16 +58,16 @@ fit:
   disc:
     mode: independent              # independent | disk_kepler | NSC | Plummer | disk_arctan
 
-    radius_range_arcsec: [0.0, 50]
-    num_shells: 50
+    radius_range_arcsec: [0.0, 45]
+    num_shells: 45
 
     pa_deg: null
     pa_unc_deg: null
 
-    beta_grid_deg: [30, 90, 5]
+    beta_grid_deg: [30, 90, 3]
 
     independent:
-      v_grid_kms: [0.0, 400.0, 40.0]
+      v_grid_kms: [0.0, 400.0, 20.0]
 
     kepler:
       mbh_grid_msun: [1.0e6, 1.0e11]
@@ -92,12 +92,12 @@ fit:
     radius_range_arcsec: [0.0, 30]
     num_shells: 30
     pa_deg: 110
-    opening_deg: 110
+    opening_deg: 120
     double_cone: true
     mask_mode: bicone
 
     beta_grid_deg: [50, 130, 5]
-    v_grid_kms: [0.0, 1200.0, 20.0]
+    v_grid_kms: [0.0, 1200.0, 25.0]
 
 advanced:
   check_masking_before_fitting: true
@@ -106,7 +106,7 @@ advanced:
   perc_out: [0.01, 0.99]
   perc_weights: [1, 1]
 
-  npt: 250000
+  npt: 200000
 
   use_global_beta_disc: true
 
