@@ -7,7 +7,6 @@ Created on Wed Feb 4 15:31:00 2026
 """
 
 from pathlib import Path
-from dataclasses import dataclass, replace
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy import radians as rad
@@ -28,6 +27,7 @@ from matplotlib.patches import Rectangle
 import math
 import os
 import re
+import sys
 import astropy.units as u
 
 from scipy.ndimage import gaussian_filter
@@ -57,19 +57,26 @@ class utils():
     
     def findrange(self, x):    
         """find step and range in axis """
-        x = np.asarray(x, dtype=float)
-        if x.ndim != 1 or x.size < 2:
-            raise ValueError("Axis must be a one-dimensional array with at least two elements.")
+        
+        dx0 = x[1] - x[0]
+        if not np.isfinite(dx0):
+            finite_dx = (x[1:] - x[:-1])[np.isfinite(x[1:] - x[:-1])]
+            if finite_dx.size == 0:
+                raise ValueError("Axis spacing is all NaN/non-finite; cannot determine range.")
+            dx0 = finite_dx[0]
 
-        dx = np.diff(x)
-        finite_dx = dx[np.isfinite(dx)]
-        if finite_dx.size == 0:
-            raise ValueError("Axis spacing is all NaN/non-finite; cannot determine range.")
+        if np.isclose(dx0, 0.025):
+            decimal = 3
+        elif np.isclose(dx0, 39.0):
+            decimal = 0
+        else:
+            decimal = 2
 
-        xstep = float(finite_dx[0])
-        if not np.allclose(finite_dx, xstep, rtol=1.0e-8, atol=1.0e-12):
-            raise ValueError("Axis spacing is not uniform; cannot determine range.")
 
+
+        xstep = np.unique(np.round(x[1:]-x[:-1], decimals=decimal))
+        if xstep.size !=1:
+            sys.exit('step non uniform')
         xrange = np.array([x[0]-xstep/2., x[-1]+xstep/2.])  # range limits are set at the external borders the two edges bin
                 
         return xrange.flatten()
@@ -681,8 +688,8 @@ class model(utils):
             print('No spatial convolution')
             self.psf_sigma = None
         else:
-            if isinstance(psf_sigma, int) or isinstance(psf_sigma, float):
-                self.psf_sigma = [psf_sigma, psf_sigma, 0]
+            if isinstance(psf_sigma, list) and len(psf_sigma) == 1:
+                self.psf_sigma = [psf_sigma[0], psf_sigma[0], 0]
             elif isinstance(psf_sigma, list) and len(psf_sigma) == 3:
                 self.psf_sigma = [ psf_sigma[0]/(2*np.sqrt(2*np.log(2))), 
                                     psf_sigma[1]/(2*np.sqrt(2*np.log(2))),
@@ -704,62 +711,54 @@ class model(utils):
         self.maps = { }
         # self.cube_mod = { }
 
-        if self.use_seeds:
-            rng_streams = {
-                name: np.random.RandomState(seed)
-                for name, seed in self.seeds.items()
-            }
-
-            def _rng(name):
-                return rng_streams[name]
-        else:
-            shared_rng = np.random.RandomState()
-
-            def _rng(name):
-                return shared_rng
-
         # 
         # define clouds r, th, phi 
         #
         if self.geometry=='spherical':
             # non-uniform distribution but assign weights for histogramdd
+            if self.use_seeds: np.random.seed(self.seeds['theta'])
+            
             # this is used in case of a bicone
             if len(self.theta_range)>1:
                 n_cones = len(self.theta_range)
                 
                 self.theta = np.array([0])
                 for theta_range in self.theta_range:
-                    theta = _rng('theta').uniform(low=rad(theta_range[0]), high=rad(theta_range[1]), size=int(self.npt/n_cones))
+                    theta = np.random.uniform(low=rad(theta_range[0]), high=rad(theta_range[1]), size=int(self.npt/n_cones))
                     self.theta = np.concatenate((self.theta, theta))
                 self.theta = self.theta[1:]
-            else: self.theta = _rng('theta').uniform(low=rad(self.theta_range[0][0]), high=rad(self.theta_range[0][1]), size=self.npt) # generate random uniform array with npts element
+            else: self.theta = np.random.uniform(low=rad(self.theta_range[0][0]), high=rad(self.theta_range[0][1]), size=self.npt) # generate random uniform array with npts element
                 
              
 
         if self.geometry=='cylindrical':
-            self.zeta = _rng('zeta').uniform(low=self.zeta_range[0], high=self.zeta_range[1], size=self.npt)
+            if self.use_seeds: np.random.seed(self.seeds['zeta'])
+            self.zeta = np.random.uniform(low=self.zeta_range[0], high=self.zeta_range[1], size=self.npt)
      
         
+        if self.use_seeds: np.random.seed(self.seeds['phi'])
         if len(self.phi_range)>1:
             n_ = len(self.phi_range)
             
             self.phi = np.array([0])
             for phi_range in self.phi_range:
-                phi = _rng('phi').uniform(low=rad(phi_range[0]), high=rad(phi_range[1]), size=int(self.npt/n_))
+                phi = np.random.uniform(low=rad(phi_range[0]), high=rad(phi_range[1]), size=int(self.npt/n_))
                 self.phi = np.concatenate((self.phi,phi))
             self.phi = self.phi[1:]
-        else: self.phi = _rng('phi').uniform(low=rad(self.phi_range[0][0]), high=rad(self.phi_range[0][1]), size=self.npt) # generate random uniform array with npts element
+        else: self.phi = np.random.uniform(low=rad(self.phi_range[0][0]), high=rad(self.phi_range[0][1]), size=self.npt) # generate random uniform array with npts element
 
         
         if self.geometry=='spherical':
             if self.logradius:
-                radius = 10**(_rng('radius').uniform(low=np.log10(self.radius_range[0]), high=np.log10(self.radius_range[1]), size=self.npt))
+                if self.use_seeds: np.random.seed(self.seeds['radius'])
+                radius = 10**(np.random.uniform(low=np.log10(self.radius_range[0]), high=np.log10(self.radius_range[1]), size=self.npt))
                 # multiply by rad**2 to make it constant if n(logr) = const.
                 self.flux_radius = radius**3*np.abs(np.sin(self.theta))/self.npt ### COSIMO: CONTROLLARE - normalizzare su interavlli raggi, theta, phi
             else:
                 # non-uniform distribution but assign weights for histogramdd
                 # multiply by rad to make it constant if n(r) = const.
-                radius = _rng('radius').uniform(low=self.radius_range[0], high=self.radius_range[1], size=self.npt)
+                if self.use_seeds: np.random.seed(self.seeds['radius'])
+                radius = np.random.uniform(low=self.radius_range[0], high=self.radius_range[1], size=self.npt)
                   
 
 
@@ -771,7 +770,8 @@ class model(utils):
                 sys.exit('logradius option in cylindrical coordinates is currently work in progress, please choose "logradius=False"...')
             else:
                 # non-uniform distribution but assign weights for histogramdd               
-                radius = _rng('radius').uniform(low=self.radius_range[0],high=self.radius_range[1],size=self.npt)                
+                if self.use_seeds: np.random.seed(self.seeds['radius'])
+                radius = np.random.uniform(low=self.radius_range[0],high=self.radius_range[1],size=self.npt)                
                 self.flux_radius = 2.*radius/(self.radius_range[1]**2)          
 
         self.radius = radius
@@ -831,26 +831,31 @@ class model(utils):
 
         if self.vel_sigma is not None:  
             if self.vel_sigma[0] > 0:
-                self.vsigx = _rng('vsigx').normal(loc=0.0, scale=self.vel_sigma[0], size=self.npt)
+                if self.use_seeds: np.random.seed(self.seeds['vsigx'])
+                self.vsigx = np.random.normal(loc=0.0, scale=self.vel_sigma[0], size=self.npt)
             else:
                 self.vsigx = np.zeros(self.npt)
                 
             if self.vel_sigma[1] > 0:
-                self.vsigy = _rng('vsigy').normal(loc=0.0, scale=self.vel_sigma[1], size=self.npt)
+                if self.use_seeds: np.random.seed(self.seeds['vsigy'])
+                self.vsigy = np.random.normal(loc=0.0, scale=self.vel_sigma[1], size=self.npt)
             else:
                 self.vsigy = np.zeros(self.npt)
 
             if self.vel_sigma[2] > 0:
-                self.vsigz = _rng('vsigz').normal(loc=0.0, scale=self.vel_sigma[2], size=self.npt)
+                if self.use_seeds: np.random.seed(self.seeds['vsigz'])
+                self.vsigz = np.random.normal(loc=0.0, scale=self.vel_sigma[2], size=self.npt)
             else:
                 self.vsigz = np.zeros(self.npt)
 
 
         if self.psf_sigma is not None:                       
-            xpsf = _rng('xpsf').normal(loc=0.0, scale=self.psf_sigma[0], size=self.npt)
+            if self.use_seeds: np.random.seed(self.seeds['xpsf'])
+            xpsf = np.random.normal(loc=0.0, scale=self.psf_sigma[0], size=self.npt)
             
             
-            ypsf = _rng('ypsf').normal(loc=0.0, scale=self.psf_sigma[1], size=self.npt)
+            if self.use_seeds: np.random.seed(self.seeds['ypsf'])
+            ypsf = np.random.normal(loc=0.0, scale=self.psf_sigma[1], size=self.npt)
             
 
             if self.psf_sigma[2] != 0:
@@ -868,7 +873,8 @@ class model(utils):
 
         
         if self.lsf_sigma is not None:
-            self.zlsf = _rng('zlsf').normal(loc=0.0, scale=self.lsf_sigma, size=self.npt)
+            if self.use_seeds: np.random.seed(self.seeds['zlsf'])
+            self.zlsf = np.random.normal(loc=0.0, scale=self.lsf_sigma, size=self.npt)
             
         else:
             self.zlsf = 0
@@ -2446,6 +2452,7 @@ def estimate_pa_from_mom1(
         rng = np.random.default_rng(random_state)
     
         arcsec_per_pix = float(pixscale) * float(nrebin)
+        psf_sigma_arcsec = psf_sigma_arcsec[0] if len(psf_sigma_arcsec)>=1 else psf_sigma_arcsec
     
         # Convert PSF sigma -> FWHM in pixels; set block size ~ FWHM
         if (use_block_bootstrap and psf_sigma_arcsec is not None
@@ -2615,7 +2622,7 @@ def estimate_radius_from_encircled_flux_with_uncertainty(
         return np.nan, np.nan, np.nan, np.array([])
 
     pix_arcsec = float(pixscale_arcsec) * float(nrebin)
-    fwhm_arcsec = 2.355 * float(psf_sigma_arcsec)
+    fwhm_arcsec = 2.355 * float(psf_sigma_arcsec[0])
 
     def _encircled_radius_arcsec(r_pix, w_):
         # sort by radius
@@ -2671,7 +2678,7 @@ def plot_kin_maps_3x3(
     cbar_w=0.012,
     cbar_gap=0.012,
     cbar_vpad=0.015,
-    # --- NEW: PSF overlay on DATA row (row=0) ---
+    # --- PSF overlay on DATA row (row=0) ---
     psf_bmaj=None,          # major axis size (arcsec)
     psf_bmin=None,          # minor axis size (arcsec)
     psf_pa=0,             # position angle of PSF ellipse (deg, CCW from +x in plot coords)
@@ -2699,12 +2706,8 @@ def plot_kin_maps_3x3(
     """
     
     extent = [m.cube['xextent'][0], m.cube['xextent'][1], m.cube['yextent'][0], m.cube['yextent'][1]]
-    if (psf_bmaj is not None) and (psf_bmin is not None):
-        psf_bmaj_draw = float(psf_bmaj) * 2.355    # arcsec
-        psf_bmin_draw = float(psf_bmin) * 2.355    # arcsec
-    else:
-        psf_bmaj_draw = None
-        psf_bmin_draw = None
+    psf_bmaj *= 2.355    # arcsec
+    psf_bmin *= 2.355    # arcsec
    
 
     # ---------- maps ----------
@@ -2924,10 +2927,10 @@ def plot_kin_maps_3x3(
                            color=psf_color, lw=psf_line_lw, zorder=7)
             ln.set_clip_path(ell)
 
-    if (psf_bmaj_draw is not None) and (psf_bmin_draw is not None):
+    if (psf_bmaj is not None) and (psf_bmin is not None):
         try:
-            bmaj = float(psf_bmaj_draw)
-            bmin = float(psf_bmin_draw)
+            bmaj = float(psf_bmaj)
+            bmin = float(psf_bmin)
             if (bmaj > 0) and (bmin > 0):
                 for i in range(3):
                     for j in range(3):  # DATA row only
@@ -3023,55 +3026,6 @@ def _make_single_km_component(
     return m
 
 
-def _merge_shell_models_batch(models):
-    if not models:
-        raise ValueError("models must contain at least one shell model.")
-
-    merged = models[0]
-    if len(models) == 1:
-        return merged
-
-    attrs = [
-        "radius",
-        "theta",
-        "phi",
-        "flux",
-        "x",
-        "y",
-        "z",
-        "xpsf",
-        "ypsf",
-        "zlsf",
-        "velx",
-        "vely",
-        "velz",
-        "vsigx",
-        "vsigy",
-        "vsigz",
-        "xobs",
-        "yobs",
-        "zobs",
-        "xobs_psf",
-        "yobs_psf",
-        "vlos_lsf",
-        "vlos",
-    ]
-    if merged.geometry == "cylindrical":
-        attrs.insert(3, "zeta")
-
-    for attr in attrs:
-        setattr(
-            merged,
-            attr,
-            np.concatenate([np.asarray(getattr(mod, attr)) for mod in models]),
-        )
-
-    merged.Pref = np.concatenate([np.asarray(mod.Pref) for mod in models], axis=1)
-    merged.Vref = np.concatenate([np.asarray(mod.Vref) for mod in models], axis=1)
-    merged.npt = merged.radius.size
-    return merged
-
-
 def _make_multishell_component(
     *,
     npt_total, n_shells,
@@ -3083,25 +3037,27 @@ def _make_multishell_component(
     v_arr, beta_arr,          # arrays length n_shells
     xycenter, alpha, gamma, vsys
 ):
-    rr = np.asarray(radius_range_shells, dtype=float)
-    if rr.ndim == 1:
-        if int(n_shells) != 1 or rr.size != 2:
-            raise ValueError(
-                "Flat radius_range_shells=[rmin, rmax] is only valid for n_shells == 1."
-            )
-        shell_ranges = [rr.tolist()]
-    else:
-        shell_ranges = [np.asarray(r, dtype=float).tolist() for r in radius_range_shells]
-
-    if len(shell_ranges) != int(n_shells):
-        raise ValueError("radius_range_shells must provide exactly one [rmin, rmax] pair per shell.")
-
+    # Build first shell as base model
     npt_shell = int(npt_total / n_shells)
-    shell_models = []
-    for i in range(int(n_shells)):
-        shell_models.append(_make_single_km_component(
+
+    m0 = _make_single_km_component(
+        npt=npt_shell,
+        geometry=geometry, radius_range=radius_range_shells[0],
+        theta_range=theta_range, phi_range=phi_range, zeta_range=zeta_range,
+        logradius=logradius, flux_func=flux_func,
+        vel1_func=vel1_func, vel2_func=vel2_func, vel3_func=vel3_func,
+        vel_sigma=vel_sigma, psf_sigma=psf_sigma, lsf_sigma=lsf_sigma,
+        cube_range=cube_range, cube_nbins=cube_nbins,
+        fluxpars=fluxpars,
+        v=v_arr[0],
+        xycenter=xycenter, alpha=alpha, beta=beta_arr[0], gamma=gamma, vsys=vsys
+    )
+
+    # Add remaining shells
+    for i in range(1, n_shells):
+        mi = _make_single_km_component(
             npt=npt_shell, 
-            geometry=geometry, radius_range=shell_ranges[i],
+            geometry=geometry, radius_range=radius_range_shells[i],
             theta_range=theta_range, phi_range=phi_range, zeta_range=zeta_range,
             logradius=logradius, flux_func=flux_func,
             vel1_func=vel1_func, vel2_func=vel2_func, vel3_func=vel3_func,
@@ -3110,9 +3066,10 @@ def _make_multishell_component(
             fluxpars=fluxpars,
             v=v_arr[i],
             xycenter=xycenter, alpha=alpha, beta=beta_arr[i], gamma=gamma, vsys=vsys
-        ))
+        )
+        m0.add_model(mi)
 
-    return _merge_shell_models_batch(shell_models)
+    return m0
 
 ################################################################################################################
 ################################################################################################################
@@ -3121,49 +3078,6 @@ def _make_multishell_component(
 #%% fitting functions
 
 _FIT_CTX = {}
-
-@dataclass(frozen=True)
-class FitScoringContext:
-    cube_obs: np.ndarray
-    vel_axis: np.ndarray
-    origin: object
-    num_shells: int
-    rin_pix: float
-    rout_pix: float
-    aperture: object = None
-    double_cone: bool = False
-    sigma_perc_kms: float = 20.0
-    perc: object = (0.01, 0.99)
-    perc_weights: object = 1.0
-    loss: str = "extreme"
-    crps_qgrid: object = None
-    geometry: str = ""
-    fit_mode: str = ""
-    kepler_deproject: bool = False
-
-
-@dataclass(frozen=True)
-class FitModelContext:
-    obs: object
-    geometry: str
-    fit_mode: str = ""
-    gamma_model: object = None
-    xy_agn: object = None
-    radius_range_model: object = None
-    theta_range: object = None
-    phi_range: object = None
-    zeta_range: object = None
-    logradius: bool = False
-    vel_sigma: object = 0.0
-    psf_sigma: object = 0.0
-    lsf_sigma: object = 0.0
-    use_seeds: bool = False
-    seeds: object = None
-    npt: int = 400000
-    scale: object = None
-    rt_arcsec: object = None
-    r_nsc_default: float = 5.0
-    a_plu_default: float = 4.0
 
 def set_fit_context(**kwargs):
     """
@@ -3213,53 +3127,6 @@ def _ctx_get(key, default=None, *, required=False):
         raise KeyError(f"km context missing required key: '{key}'. "
                        f"Did you forget set_fit_context({key}=...)?")
     return default
-
-
-def _scoring_context_from_fit_ctx():
-    obs = _ctx_get("obs", required=True)
-    return FitScoringContext(
-        cube_obs=np.asarray(obs.cube["data"]),
-        vel_axis=np.asarray(_ctx_get("vel_axis", required=True)),
-        origin=_ctx_get("origin", required=True),
-        num_shells=int(_ctx_get("num_shells", required=True)),
-        rin_pix=float(_ctx_get("rin_pix", required=True)),
-        rout_pix=float(_ctx_get("rout_pix", required=True)),
-        aperture=_ctx_get("aperture", default=None),
-        double_cone=bool(_ctx_get("double_cone", default=False)),
-        sigma_perc_kms=float(_ctx_get("SIGMA_PERC_KMS", default=20.0)),
-        perc=_ctx_get("perc", default=(0.01, 0.99)),
-        perc_weights=_ctx_get("perc_weights", default=1.0),
-        loss=_ctx_get("loss", default="extreme"),
-        crps_qgrid=_ctx_get("CRPS_QGRID", default=None),
-        geometry=_ctx_get("geometry", required=True),
-        fit_mode=_ctx_get("FIT_MODE", default=""),
-        kepler_deproject=bool(_ctx_get("KEPLER_DEPROJECT", default=False)),
-    )
-
-
-def _model_context_from_fit_ctx():
-    return FitModelContext(
-        obs=_ctx_get("obs", required=True),
-        geometry=_ctx_get("geometry", required=True),
-        fit_mode=_ctx_get("FIT_MODE", default=""),
-        gamma_model=_ctx_get("gamma_model", required=True),
-        xy_agn=_ctx_get("xy_AGN", required=True),
-        radius_range_model=_ctx_get("radius_range_model", required=True),
-        theta_range=_ctx_get("theta_range", required=True),
-        phi_range=_ctx_get("phi_range", required=True),
-        zeta_range=_ctx_get("zeta_range", required=True),
-        logradius=bool(_ctx_get("logradius", default=False)),
-        vel_sigma=_ctx_get("vel_sigma", default=0.0),
-        psf_sigma=_ctx_get("psf_sigma", default=0.0),
-        lsf_sigma=_ctx_get("lsf_sigma", default=0.0),
-        use_seeds=bool(_ctx_get("use_seeds", default=False)),
-        seeds=_ctx_get("seeds", default=None),
-        npt=int(_ctx_get("npt", default=400000)),
-        scale=_ctx_get("scale", default=None),
-        rt_arcsec=_ctx_get("RT_ARCSEC", default=None),
-        r_nsc_default=float(_ctx_get("R_nsc_default", default=5.0)),
-        a_plu_default=float(_ctx_get("a_plu_default", default=4.0)),
-    )
 
 
 def make_cone_spatial_mask(shape_yx, center_xy, pa_deg, opening_deg,
@@ -3471,37 +3338,14 @@ def plot_bestfit_summary(best, r_edges_pix, arcsec_per_pix, scale):
 
 
 
-def build_v_grid_and_label(
-    geometry: str,
-    fit_mode: str,
-    *,
-    v_min=None,
-    v_max=None,
-    step_v=None,
-    n_geom_v=None,
-):
+def build_v_grid_and_label(geometry: str, fit_mode: str):
     geom = str(geometry).lower()
     mode = str(fit_mode)
 
-    if v_min is None:
-        v_min = float(_ctx_get("v_min", required=True))
-    else:
-        v_min = float(v_min)
-
-    if v_max is None:
-        v_max = float(_ctx_get("v_max", required=True))
-    else:
-        v_max = float(v_max)
-
-    if step_v is None:
-        step_v = float(_ctx_get("step_v", required=True))
-    else:
-        step_v = float(step_v)
-
-    if n_geom_v is None:
-        n_geom = int(_ctx_get("n_geom_v", 50))
-    else:
-        n_geom = int(n_geom_v)
+    v_min  = float(_ctx_get("v_min", required=True))
+    v_max  = float(_ctx_get("v_max", required=True))
+    step_v = float(_ctx_get("step_v", required=True))
+    n_geom = int(_ctx_get("n_geom_v", 50))
 
     if geom == "cylindrical" and mode == "disk_kepler":
         v_arr = np.geomspace(v_min, v_max, n_geom)
@@ -5374,13 +5218,11 @@ def vrot_arctan(rad_arcsec, theta, phi, pars):
 def _shell_edges_from_mask(shape, center_xy, inc_deg, pa_deg,
                             base_mask, r_min_pix, r_max_pix, n_shells,
                             aperture_deg=None, double_cone=False,
-                            *, geometry=None, ctx=None):
+                            *, geometry=None):
     """
     Same as your function but geometry is explicit (no global).
     geometry: 'cylindrical' or 'spherical'
     """
-    if geometry is None and ctx is not None:
-        geometry = ctx.geometry
     if geometry is None:
         geometry = _ctx_get("geometry", required=True)
 
@@ -5439,20 +5281,11 @@ def residuals_percentiles_cone(
     qgrid=None,
     geometry=None,
     FIT_MODE=None,
-    KEPLER_DEPROJECT=None,
-    ctx=None,
+    KEPLER_DEPROJECT=None
 ):
     """
     Same math, but now all former globals are explicit (or pulled from km context).
     """
-    if ctx is not None:
-        if geometry is None:
-            geometry = ctx.geometry
-        if FIT_MODE is None:
-            FIT_MODE = ctx.fit_mode
-        if KEPLER_DEPROJECT is None:
-            KEPLER_DEPROJECT = ctx.kepler_deproject
-
     if geometry is None:
         geometry = _ctx_get("geometry", required=True)
     if FIT_MODE is None:
@@ -5475,7 +5308,7 @@ def residuals_percentiles_cone(
         shape, center_xy, inc_deg, pa_math, edge_mask,
         r_min_pix, r_max_pix, n_shells,
         aperture_deg=ap_for_edges, double_cone=double_cone,
-        geometry=geometry, ctx=ctx
+        geometry=geometry
     )
 
     ring_masks = _make_ring_masks_by_geometry(
@@ -5535,7 +5368,7 @@ def residuals_percentiles_cone(
 
 def make_mod(beta, vparam, obs=None, gamma_model=None,
              vel3_func_override=None, vel3_pars_override=None,
-             ncloud=None, *, ctx=None):
+             ncloud=None):
     """
     Drop-in replacement:
     - You can call make_mod(beta, vparam, obs, gamma_model, ...)
@@ -5545,34 +5378,33 @@ def make_mod(beta, vparam, obs=None, gamma_model=None,
       geometry, FIT_MODE, obs, xy_AGN, radius_range_model, theta_range, phi_range, zeta_range,
       logradius, vel_sigma, psf_sigma, lsf_sigma, use_seeds, seeds, scale, RT_ARCSEC, scale, npt
     """
-    if ctx is None:
-        ctx = _model_context_from_fit_ctx()
+    geometry = _ctx_get("geometry", required=True)
+    obse = _ctx_get("obs", required=True)
 
-    geometry = ctx.geometry
-    FIT_MODE = ctx.fit_mode
-    use_seeds = ctx.use_seeds
-    seeds = ctx.seeds
-    radius_range_model = ctx.radius_range_model
-    theta_range = ctx.theta_range
-    phi_range = ctx.phi_range
-    zeta_range = ctx.zeta_range
-    logradius = ctx.logradius
+    FIT_MODE = _ctx_get("FIT_MODE", default="")
+    use_seeds = _ctx_get("use_seeds", default=False)
+    seeds = _ctx_get("seeds", default=None)
+    radius_range_model = _ctx_get("radius_range_model", required=True)
+    theta_range = _ctx_get("theta_range", required=True)
+    phi_range = _ctx_get("phi_range", required=True)
+    zeta_range = _ctx_get("zeta_range", required=True)
+    logradius = _ctx_get("logradius", default=False)
 
-    vel_sigma = ctx.vel_sigma
-    psf_sigma = ctx.psf_sigma
-    lsf_sigma = ctx.lsf_sigma
+    vel_sigma = _ctx_get("vel_sigma", default=0.0)
+    psf_sigma = _ctx_get("psf_sigma", default=0.0)
+    lsf_sigma = _ctx_get("lsf_sigma", default=0.0)
 
     if obs is None:
-        obs = ctx.obs
+        obs = _ctx_get("obs", required=True)
     if gamma_model is None:
-        gamma_model = ctx.gamma_model
+        gamma_model = _ctx_get("gamma_model", required=True)
 
-    xy_AGN = ctx.xy_agn
+    xy_AGN = _ctx_get("xy_AGN", required=True)
 
     if ncloud is not None:
         npt = int(ncloud)
     else:
-        npt = int(ctx.npt)
+        npt = int(_ctx_get("npt", default=400000))
 
     g = geometry.lower()
 
@@ -5587,22 +5419,22 @@ def make_mod(beta, vparam, obs=None, gamma_model=None,
 
     elif g == 'cylindrical':
         if FIT_MODE == 'disk_kepler':
-            scale = float(ctx.scale)
+            scale = float(_ctx_get("scale", required=True))
             vel3_func = vkep_astropy if vel3_func_override is None else vel3_func_override
             vel3_pars = ([float(vparam), scale]
                          if vel3_pars_override is None else list(vel3_pars_override))
 
         elif FIT_MODE == 'NSC':
-            scale = float(ctx.scale)
+            scale = float(_ctx_get("scale", required=True))
             # default R_nsc if you had hardcoded it before
-            default_Rnsc = float(ctx.r_nsc_default)
+            default_Rnsc = float(_ctx_get("R_nsc_default", default=5.0))
             vel3_func = vnsc_astropy
             vel3_pars = ([float(vparam), scale, default_Rnsc]
                          if vel3_pars_override is None else list(vel3_pars_override))
 
         elif FIT_MODE == 'Plummer':
-            scale = float(ctx.scale)
-            default_a = float(ctx.a_plu_default)
+            scale = float(_ctx_get("scale", required=True))
+            default_a = float(_ctx_get("a_plu_default", default=4.0))
             vel3_func = vplummer_astropy
             vel3_pars = ([float(vparam), scale, default_a]
                          if vel3_pars_override is None else list(vel3_pars_override))
@@ -5610,7 +5442,7 @@ def make_mod(beta, vparam, obs=None, gamma_model=None,
         elif FIT_MODE == 'disk_arctan':
             vel3_func = vrot_arctan if vel3_func_override is None else vel3_func_override
             if vel3_pars_override is None:
-                RT_ARCSEC = ctx.rt_arcsec
+                RT_ARCSEC = _ctx_get("RT_ARCSEC", required=True)
                 vel3_pars = [float(vparam), float(RT_ARCSEC)]
             else:
                 if len(vel3_pars_override) != 2:
@@ -5648,26 +5480,24 @@ def make_mod(beta, vparam, obs=None, gamma_model=None,
 
     return m
 
-def build_model(beta, v, *, rt=None, R_nsc=None, a_plu=None, ctx=None):
+def build_model(beta, v, *, rt=None, R_nsc=None, a_plu=None):
     """
     Same external behavior as your old build_model, but driven by km context.
     """
-    if ctx is None:
-        ctx = _model_context_from_fit_ctx()
-
-    geometry = ctx.geometry
-    FIT_MODE = ctx.fit_mode
-    obs = ctx.obs
-    gamma_model = ctx.gamma_model
-    npt = int(ctx.npt)
-    scale = ctx.scale
+    geometry = _ctx_get("geometry", required=True)
+    FIT_MODE = _ctx_get("FIT_MODE", default="")
+    obs = _ctx_get("obs", required=True)
+    gamma_model = _ctx_get("gamma_model", required=True)
+    npt = int(_ctx_get("npt", default=400000))
+    scale = _ctx_get("scale", default=None)
+    scale = _ctx_get("scale", default=None)
 
     geom = geometry.lower()
     mode = FIT_MODE
 
     if geom == "cylindrical" and mode == "disk_kepler":
         MBH = float(v)
-        return make_mod(beta, MBH, obs=obs, gamma_model=gamma_model, ncloud=npt, ctx=ctx)
+        return make_mod(beta, MBH, obs=obs, gamma_model=gamma_model, ncloud=npt)
 
     if geom == "cylindrical" and mode == "NSC":
         if R_nsc is None:
@@ -5677,7 +5507,7 @@ def build_model(beta, v, *, rt=None, R_nsc=None, a_plu=None, ctx=None):
         A = float(v)
         vel3_pars_nsc = [A, float(scale), float(R_nsc)]
         return make_mod(beta, A, obs=obs, gamma_model=gamma_model,
-                        vel3_pars_override=vel3_pars_nsc, ncloud=npt, ctx=ctx)
+                        vel3_pars_override=vel3_pars_nsc, ncloud=npt)
 
     if geom == "cylindrical" and mode == "Plummer":
         if a_plu is None:
@@ -5687,48 +5517,58 @@ def build_model(beta, v, *, rt=None, R_nsc=None, a_plu=None, ctx=None):
         M0 = float(v)
         vel3_pars_plu = [M0, float(scale), float(a_plu)]
         return make_mod(beta, M0, obs=obs, gamma_model=gamma_model,
-                        vel3_pars_override=vel3_pars_plu, ncloud=npt, ctx=ctx)
+                        vel3_pars_override=vel3_pars_plu, ncloud=npt)
 
     if geom == "cylindrical" and mode == "disk_arctan":
         if rt is None:
             raise ValueError("disk_arctan requires rt")
         Vmax = float(v)
         return make_mod(beta, Vmax, obs=obs, gamma_model=gamma_model,
-                        vel3_pars_override=[Vmax, float(rt)], ncloud=npt, ctx=ctx)
+                        vel3_pars_override=[Vmax, float(rt)], ncloud=npt)
 
     # default (independent v)
-    return make_mod(beta, float(v), obs=obs, gamma_model=gamma_model, ncloud=npt, ctx=ctx)
+    return make_mod(beta, float(v), obs=obs, gamma_model=gamma_model, ncloud=npt)
 
 
-def eval_kappa_for_model(model_cube, beta, pa_deg, *, ctx=None):
+def eval_kappa_for_model(model_cube, beta, pa_deg):
     """
-    Compare model_cube to the observed cube using an explicit scoring context.
-    Falls back to km context for backward compatibility.
+    Uses km context to compare model_cube to the observed cube.
     """
-    if ctx is None:
-        ctx = _scoring_context_from_fit_ctx()
+    obs = _ctx_get("obs", required=True)
+    vel_axis = _ctx_get("vel_axis", required=True)       # 1D array in km/s
+    origin = _ctx_get("origin", required=True)
+
+    num_shells = int(_ctx_get("num_shells", required=True))
+    rin_pix = float(_ctx_get("rin_pix", required=True))
+    rout_pix = float(_ctx_get("rout_pix", required=True))
+    aperture = _ctx_get("aperture", default=None)
+    double_cone = bool(_ctx_get("double_cone", default=False))
+    SIGMA_PERC_KMS = float(_ctx_get("SIGMA_PERC_KMS", default=20.0))
+    perc = _ctx_get("perc", default=(0.01, 0.99))
+    perc_weights = _ctx_get("perc_weights", default=1.0)
+    loss = _ctx_get("loss", default="extreme")
+    CRPS_QGRID = _ctx_get("CRPS_QGRID", default=None)
 
     kappa_shells, pack = residuals_percentiles_cone(
         cube_model=model_cube,
-        cube_obs=ctx.cube_obs,
-        vel_axis=ctx.vel_axis,
-        center_xy=ctx.origin,
+        cube_obs=obs.cube["data"],
+        vel_axis=vel_axis,
+        center_xy=origin,
         inc_deg=float(beta),
         pa_deg=float(pa_deg),
-        n_shells=ctx.num_shells,
-        r_min_pix=ctx.rin_pix,
-        r_max_pix=ctx.rout_pix,
-        aperture_deg=ctx.aperture,
-        double_cone=ctx.double_cone,
-        perc=ctx.perc,
-        sigma_perc_kms=ctx.sigma_perc_kms,
+        n_shells=num_shells,
+        r_min_pix=rin_pix,
+        r_max_pix=rout_pix,
+        aperture_deg=aperture,
+        double_cone=double_cone,
+        perc=perc,
+        sigma_perc_kms=SIGMA_PERC_KMS,
         mask_mode="model",
         edges_mode="model",
         min_pixels_per_shell=2,
-        perc_weights=ctx.perc_weights,
-        loss=ctx.loss,
-        qgrid=ctx.crps_qgrid,
-        ctx=ctx,
+        perc_weights=perc_weights,
+        loss=loss,
+        qgrid=CRPS_QGRID
     )
     return kappa_shells, pack
 
@@ -6058,13 +5898,12 @@ def fit_gridsearch_component(
 
     # weights handling (your convention)
     pw = 1.0 if (loss == "crps") else perc_weights
-    disc_cube_for_fit = disc_cube
 
     set_fit_context(
         geometry=geometry,
         FIT_MODE=FIT_MODE,
         KEPLER_DEPROJECT=False,
-        disc_cube=disc_cube_for_fit,
+        disc_cube=disc_cube,
         obs=obs_for_fit,
         vel_axis=vel_axis,
         origin=origin,
@@ -6089,7 +5928,7 @@ def fit_gridsearch_component(
         phi_range=phi_range,
         zeta_range=zeta_range,
         logradius=bool(logradius),
-        psf_sigma=float(psf_sigma),
+        psf_sigma=psf_sigma,
         lsf_sigma=float(lsf_sigma),
         vel_sigma=float(vel_sigma),
         v_min=float(v_min),
@@ -6099,57 +5938,8 @@ def fit_gridsearch_component(
         a_plu_default=float(a_plu) if a_plu is not None else 4.0,
         n_geom_v=int(n_geom_v),
     )
-
-    scoring_ctx = FitScoringContext(
-        cube_obs=np.asarray(obs_for_fit.cube["data"]),
-        vel_axis=np.asarray(vel_axis),
-        origin=origin,
-        num_shells=int(num_shells),
-        rin_pix=float(rin_pix),
-        rout_pix=float(rout_pix),
-        aperture=float(aperture_deg),
-        double_cone=bool(double_cone),
-        sigma_perc_kms=float(SIGMA_PERC_KMS),
-        perc=perc,
-        perc_weights=pw,
-        loss=loss,
-        crps_qgrid=CRPS_QGRID,
-        geometry=geometry,
-        fit_mode=FIT_MODE,
-        kepler_deproject=False,
-    )
-
-    model_ctx = FitModelContext(
-        obs=obs_for_fit,
-        geometry=geometry,
-        fit_mode=FIT_MODE,
-        gamma_model=float(gamma_model_deg),
-        xy_agn=[0.0, 0.0],
-        radius_range_model=list(radius_range_model_arcsec),
-        theta_range=theta_range,
-        phi_range=phi_range,
-        zeta_range=zeta_range,
-        logradius=bool(logradius),
-        vel_sigma=float(vel_sigma),
-        psf_sigma=float(psf_sigma),
-        lsf_sigma=float(lsf_sigma),
-        use_seeds=False,
-        seeds=None,
-        npt=int(npt),
-        scale=scale,
-        rt_arcsec=RT_ARCSEC,
-        r_nsc_default=float(R_nsc) if R_nsc is not None else 5.0,
-        a_plu_default=float(a_plu) if a_plu is not None else 4.0,
-    )
     
-    v_array, rt_array, Y_LABEL = build_v_grid_and_label(
-        geometry,
-        FIT_MODE,
-        v_min=v_min,
-        v_max=v_max,
-        step_v=step_v,
-        n_geom_v=n_geom_v,
-    )
+    v_array, rt_array, Y_LABEL = build_v_grid_and_label(geometry, FIT_MODE)
 
 
     num_beta, num_v = len(beta_array), len(v_array)
@@ -6172,38 +5962,27 @@ def fit_gridsearch_component(
 
                 progress.advance(task)
 
+                disc_cube = _ctx_get("disc_cube", default=None)
+
                 # ---- primary lobe ----
-                model1 = build_model(beta, v, rt=RT_ARCSEC, R_nsc=R_nsc, a_plu=a_plu, ctx=model_ctx)
+                model1 = build_model(beta, v, rt=RT_ARCSEC, R_nsc=R_nsc, a_plu=a_plu)
             
                 # ---- second lobe for bicones ----
                 if bool(double_cone):
                     beta_flip  = 180.0 - beta
                     gamma_flip = (gamma_model_deg + 180.0) % 360.0
             
-                    model2 = build_model(
-                        beta_flip,
-                        v,
-                        rt=RT_ARCSEC,
-                        R_nsc=R_nsc,
-                        a_plu=a_plu,
-                        ctx=replace(model_ctx, gamma_model=gamma_flip),
-                    )
+                    # temporarily override gamma
+                    _FIT_CTX["gamma_model"] = gamma_flip
+                    model2 = build_model(beta_flip, v, rt=RT_ARCSEC, R_nsc=R_nsc, a_plu=a_plu)
+                    _FIT_CTX["gamma_model"] = gamma_model_deg      # restore
             
-                    combined_model_cube = disc_cube_for_fit + model1.cube["data"] + model2.cube["data"]
+                    combined_model_cube = disc_cube + model1.cube["data"] + model2.cube["data"]
                 else:
-                    combined_model_cube = (
-                        disc_cube_for_fit + model1.cube["data"]
-                        if disc_cube_for_fit is not None
-                        else model1.cube["data"]
-                    )
+                    combined_model_cube = disc_cube + model1.cube["data"] if disc_cube is not None else model1.cube["data"]
             
                 # ---- evaluate χ² ----
-                kappa_shells, _ = eval_kappa_for_model(
-                    combined_model_cube,
-                    beta,
-                    float(gamma_model_deg),
-                    ctx=scoring_ctx,
-                )
+                kappa_shells, _ = eval_kappa_for_model(combined_model_cube, beta, float(gamma_model_deg))
 
                 chi_squared_map[:, ib, iv] = kappa_shells
  
@@ -7483,3 +7262,7 @@ def _save_moment_maps_fits(obs, model, output_path: Path):
     ])
 
     hdul.writeto(output_path, overwrite=True)
+
+
+
+
