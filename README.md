@@ -152,3 +152,11 @@ archivePrefix = {arXiv},
 
 ## License
 This project is licensed under the terms of the [GNU General Public License version 3.0](https://choosealicense.com/licenses/gpl-3.0/) license.
+
+## Disclaimer
+
+This software is provided for research and educational purposes only.
+The authors make no guarantees regarding the correctness, reliability, or suitability of the results produced.
+
+Any use of this software, including in scientific publications, is at your own risk. The authors are not responsible for any incorrect results, conclusions, or damages arising from its use.
+
