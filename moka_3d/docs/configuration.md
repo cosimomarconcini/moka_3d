@@ -70,7 +70,7 @@ processing:
   sn_thresh: 3
   nrebin: 1
   pixel_scale_arcsec_manual: null
-  psf_sigma: 0.9
+  psf_sigma: [0.9]
   lsf_sigma: 70.0
 
 fit:
