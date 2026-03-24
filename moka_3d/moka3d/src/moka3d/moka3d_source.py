@@ -32,8 +32,7 @@ import astropy.units as u
 
 from scipy.ndimage import gaussian_filter
 from rich.progress import Progress, BarColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
-import logging
-logger = logging.getLogger(__name__)
+
 
 from astropy.wcs import WCS
 from astropy.coordinates import SkyCoord
@@ -46,6 +45,58 @@ from matplotlib.ticker import AutoMinorLocator
 import json
 
 from .plotting import finalize_figure
+import logging
+logger = logging.getLogger(__name__)
+
+ACTION_LEVEL = 25
+logging.addLevelName(ACTION_LEVEL, "ACTION")
+
+def action(self, message, *args, **kwargs):
+    if self.isEnabledFor(ACTION_LEVEL):
+        self._log(ACTION_LEVEL, message, args, **kwargs)
+
+logging.Logger.action = action
+
+
+class ColorFormatter(logging.Formatter):
+    COLORS = {
+        "DEBUG": "\033[36m",
+        "INFO": "\033[0m",
+        "ACTION": "\033[32m",
+        "WARNING": "\033[33m",
+        "ERROR": "\033[31m",
+        "CRITICAL": "\033[1;31m",
+    }
+    RESET = "\033[0m"
+
+    def format(self, record):
+        color = self.COLORS.get(record.levelname, self.RESET)
+        formatted = super().format(record)
+        return f"{color}{formatted}{self.RESET}"
+
+
+def _setup_logging(output_dir: Path) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    log_file = output_dir / "moka3d.log"
+
+    logger.setLevel(logging.INFO)
+    logger.handlers.clear()
+    logger.propagate = False
+
+    formatter_file = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
+    formatter_console = ColorFormatter("%(asctime)s | %(levelname)s | %(message)s")
+
+    fh = logging.FileHandler(log_file, mode="w")
+    fh.setLevel(logging.INFO)
+    fh.setFormatter(formatter_file)
+    logger.addHandler(fh)
+
+    sh = logging.StreamHandler()
+    sh.setLevel(logging.INFO)
+    sh.setFormatter(formatter_console)
+    logger.addHandler(sh)
+
+
 
 
 class utils():
@@ -695,7 +746,8 @@ class model(utils):
                                     psf_sigma[1]/(2*np.sqrt(2*np.log(2))),
                                     np.radians(psf_sigma[2]+90) ]
             else:
-                sys.exit('psf_sigma either 1 or 3 elements')
+                logger.critical('The PSF must be either 1 or 3 elements')
+                sys.exit()
        
 
         if lsf_sigma is None:

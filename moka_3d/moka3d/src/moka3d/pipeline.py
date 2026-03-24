@@ -571,23 +571,26 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         psf_sigma_arcsec=cfg.processing.psf_sigma,
     )
 
-    pa_est, pa_est_unc = km.estimate_pa_from_mom1(
-        obs.maps["vel"],
-        center_xy=origin,
-        pixscale=pixscale,
-        nrebin=cfg.processing.nrebin,
-        xlimshow=cfg.processing.xrange,
-        ylimshow=cfg.processing.yrange,
-        psf_sigma_arcsec=cfg.processing.psf_sigma,
-        R_data_arcsec=R_int_arcsec,
-        R_data_err_arcsec=R_int_err,
-        vel_range = velrange
-    )
-    finalize_figure(output_dir / "03_PA_estimate.png", show=cfg.output.show_plots)
+    if cfg.fit.component_mode not in ['outflow']:
+        pa_est, pa_est_unc = km.estimate_pa_from_mom1(
+            obs.maps["vel"],
+            center_xy=origin,
+            pixscale=pixscale,
+            nrebin=cfg.processing.nrebin,
+            xlimshow=cfg.processing.xrange,
+            ylimshow=cfg.processing.yrange,
+            psf_sigma_arcsec=cfg.processing.psf_sigma,
+            R_data_arcsec=R_int_arcsec,
+            R_data_err_arcsec=R_int_err,
+            vel_range = velrange
+        )
+        finalize_figure(output_dir / "03_PA_estimate.png", show=cfg.output.show_plots)
+    else:
+        pa_est, pa_est_unc = 0,0 # Irrelevant for the outflow fit
+        
+         
+    
     if (cfg.fit.component_mode == "disk") and bool(cfg.advanced.check_masking_before_fitting):
-        #print(f"\nPA estimate preview saved to:\n{output_dir / '03_PA_estimate.png'}")
-        #print("Check the PA estimate figure.")
-        #answer = input("Continue with this PA estimate? [y/n]: ").strip().lower()
 
         logger.action("PA estimate preview saved to: %s", output_dir)
         logger.action("Continue with this PA? [y/n]: ")
@@ -923,7 +926,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         obs_disc_fit.plot_kin_maps(flrange=flrange, vrange=velrange, sigrange=sigrange,
                                    xy_AGN=xy_AGN, xrange=xrange, yrange=yrange)
         finalize_figure(output_dir / "02_disc_fit_input_maps.png", show=cfg.output.show_plots)
-        if disc_cfg.pa_deg is None:
+        if disc_cfg.pa_deg is None and FIT_COMPONENT_MODE not in ['outflow']:
             gamma_disc, gamma_disc_unc = km.estimate_pa_from_mom1(
                 obs_disc_fit.maps["vel"],
                 center_xy=origin,
