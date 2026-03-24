@@ -123,7 +123,7 @@ Most important fields:
 - `paths.output_dir`
   Directory where run outputs will be written.
 - `input.cube_file`
-  The FITS cube to analyze.
+  The FITS cube to analyze. This has to be the noise free, emission-line fit, with the continuum emission subtracted. 
 - `input.sn_map`
   Optional 2D S/N map used for masking.
 - `input.ne_map`
