@@ -118,7 +118,7 @@ This directory contains:
 MOKA<sup>3D</sup> is actively evolving. Current limitations include:
 
 - Runtime can grow substantially with large parameter grids, many shells, and high Monte Carlo sampling.
-- Energetics are limited to supported emission lines ($\mathrm{H}\beta$, $[\mathrm{O III}] 5007\\mathrm{Å}$, $\mathrm{H}\alpha$) and require a valid FITS `BUNIT`.
+- The outflow energetics are limited to supported emission lines ($\mathrm{H}\beta$, $[\mathrm{O III}] 5007\\mathrm{Å}$, $\mathrm{H}\alpha$) and require a valid FITS `BUNIT`.
 - The CLI and YAML configuration define the stable public interface; low-level Python APIs should be considered internal.
 
 ## Citation
