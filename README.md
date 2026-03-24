@@ -1,92 +1,129 @@
 <h1>
-  <img src="logo.png" width="100" height ="100">
+  <img src="moka_3d/logo_moka3d.png" width="80" height ="100">
    MOKA<sup>3D</sup>
 </h1>
 
-MOKA<sup>3D</sup> is a Python code for 3D kinematic modeling of emission-line gas in galaxies, designed to analyze integral-field spectroscopy data cubes.
+MOKA<sup>3D</sup> is a scientific Python package for 3D kinematic modeling of emission-line gas in spectral cubes. It enables fitting of rotating disks, outflows, and combined disk+outflow systems directly in cube space, producing both kinematic diagnostics and derived physical properties.
 
-The code reconstructs gas kinematics directly in the data cube space, comparing observed and modeled spectral profiles to constrain the velocity structure of the gas.
+## Key Features
 
-Typical applications include:
+- Fit rotating disks, outflows, and combined disk+outflow systems from spectral cubes.
+- Work directly on FITS data cubes with wavelength- or frequency-based spectral axes.
+- Use a reproducible command-line workflow driven by YAML configuration files.
+- Produce summary tables, diagnostic plots, model cubes, moment maps, and optional energetics outputs.
 
-- AGN/SF-driven outflows
-- rotating gas discs
-- combined disc + outflow systems
+## Installation
 
-The current set up has been tested for MUSE (WFM, NFM), JWST (MIRI MRS, NIRSpec IFU), SINFONI, and ALMA.
+The installable Python package lives in the `moka3d/` subdirectory of this repository.
 
----
+Clone the repository:
 
-# History
-Mar 13 2026 -- Included fit of ALMA data cubes
-
----
-
-# Features
-
-- Fit rotating discs
-- Fit biconical outflows
-- Combined disc + outflow modeling
-- Direct comparison between model and observed data cubes
-- Shell-based radial kinematic modeling
-- Percentile-based velocity diagnostics
-- Full diagnostic plots and residual maps
-- Command-line interface for reproducible workflows
-
----
-        
-# Installation
-I suggest to create a new environment. Fist of all, download in your desired path the environment_moka.yml file in this repo and then install MOKA<sup>3D</sup> as explained in the following.
-1) conda env create -f environment_moka.yml
-2) conda activate moka3d_env
-
-
-
-Then, clone the MOKA<sup>3D</sup> repository. For now this repo is private, therefore to clone it you will need a personal token, you can do it like this:
-
-Click your profile picture at the top right --> Settings --> Scroll down the left panel --> Developer settings --> Personal access tokens --> Tokens (classic) --> Generate new token (classic) --> select only 'repo' --> give it a random name --> scroll down and create token --> save token 
-
-Then, from terminal run:
-
+```bash
 git clone https://github.com/cosimomarconcini/moka_3d.git
+cd moka_3d
+```
 
-And fill this:
+### pip
 
-Username: your GitHub username (not email, username)
+From the repository root:
 
-Password: the token
+```bash
+python -m pip install -e ./moka3d
+```
 
----
+If you prefer a non-editable install:
 
-# Run MOKA<sup>3D</sup>
+```bash
+python -m pip install ./moka3d
+```
 
-Move to the pulled folder:
+### Optional conda
 
-cd moka_3d/moka3d
+If you want an isolated environment, the simplest option is to create it from the bundled `environment.yml` file:
 
-Install the moka3d package:
+```bash
+conda env create -f environment.yml
+conda activate moka3d
+```
 
-python -m pip install -e .
+If you prefer to create the environment manually:
 
-Then test moka3d installation:
+```bash
+conda create -n moka3d_env python=3.11
+conda activate moka3d_env
+python -m pip install -e ./moka3d
+```
 
-pip show moka3d
+Verify that the CLI is available:
 
-And:
+```bash
+moka3d --help
+```
 
+## Quickstart
+
+The example configuration uses relative paths such as `./Data`, so you must run it from inside the `moka3d/` subdirectory.
+
+Run the example end-to-end:
+
+```bash
+git clone https://github.com/cosimomarconcini/moka_3d.git
+cd moka3d
+python -m pip install -e ./moka3d
+
+# Move into the example directory (required because of relative paths)
+cd moka3d
+
+# Check installation
 moka3d --help
 
-If no errors show up then everything worked correctly and you can proceed to fit your target with MOKA 3D.
+# Write a template config for future runs
+moka3d init-config example_config.yaml
 
-This will run the config_basic.yaml file with all the necessary info on your data and fit type.
+# Validate the bundled example config
+moka3d validate config_moka.yaml
 
-moka3d run config_moka.yaml 
+# Run the bundled example
+moka3d run config_moka.yaml
+```
 
----
+The example uses:
 
-# Attribution
+- `config_moka.yaml`
+- sample cubes in `Data/`
+- ancillary maps in `Ancillary_material/`
 
-If you use MOKA<sup>3D</sup> for your research, please cite at least [Marconcini+23](https://ui.adsabs.harvard.edu/abs/2023A%26A...677A..58M/abstract), with the following BibTeX entry:
+When the run completes, a new timestamped directory will appear under:
+
+```text
+Outputs/YYYY-MM-DD_HHMMSS_<cube_name>/
+```
+
+This directory contains:
+
+- `summary.json` - machine-readable best-fit parameters and run summary
+- `moka3d.log` - execution log with warnings and runtime details
+- diagnostic plots (`.png`) - masks, residuals, shell diagnostics, map comparisons
+- optional FITS outputs - model cubes, moment maps, and derived products
+
+## Documentation
+
+- [Quickstart](moka_3d/docs/quickstart.md)
+- [Configuration Guide](moka_3d/docs/configuration.md)
+- [Outputs Guide](moka_3d/docs/outputs.md)
+- [Troubleshooting](moka_3d/docs/troubleshooting.md)
+
+## Known Limitations
+
+MOKA<sup>3D</sup> is actively evolving. Current limitations include:
+
+- Runtime can grow substantially with large parameter grids, many shells, and high Monte Carlo sampling.
+- Energetics are limited to supported emission lines ($\mathrm{H}\beta$, $[\mathrm{O III}] 5007\\mathrm{Å}$, $\mathrm{H}\alpha$) and require a valid FITS `BUNIT`.
+- The CLI and YAML configuration define the stable public interface; low-level Python APIs should be considered internal.
+
+## Citation
+
+If you use MOKA<sup>3D</sup> for your research, please cite cite the associated methodological paper [Marconcini+23](https://ui.adsabs.harvard.edu/abs/2023A%26A...677A..58M/abstract), with the following BibTeX entry and the software release you used:
 
 ```bibtex
 @ARTICLE{2023A&A...677A..58M,
@@ -106,5 +143,20 @@ archivePrefix = {arXiv},
        adsurl = {https://ui.adsabs.harvard.edu/abs/2023A&A...677A..58M},
       adsnote = {Provided by the SAO/NASA Astrophysics Data System}
 }
+```
 
+## Release Notes
+
+- [MOKA3D v0.1](moka_3d/docs/release_notes_v0.1.md)
+
+
+## License
+This project is licensed under the terms of the [GNU General Public License version 3.0](https://choosealicense.com/licenses/gpl-3.0/) license.
+
+## Disclaimer
+
+This software is provided for research purposes only.
+The authors make no guarantees regarding the correctness, reliability, or suitability of the results produced.
+
+Any use of this software, including in scientific publications, is at your own risk. The authors are not responsible for any incorrect results, conclusions, or damages arising from its use.
 

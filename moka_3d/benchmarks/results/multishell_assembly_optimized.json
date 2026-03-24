@@ -1,0 +1,66 @@
+{
+  "benchmark": "_make_multishell_component",
+  "config": {
+    "cube_nbins": [
+      21,
+      13,
+      13
+    ],
+    "geometry": "cylindrical",
+    "npt_total": 4800,
+    "repeats": 3,
+    "shells": [
+      1,
+      8,
+      16
+    ],
+    "warmup": 1
+  },
+  "results": [
+    {
+      "flux_sum": 3006.975249518986,
+      "n_shells": 1,
+      "npt_final": 4800,
+      "npt_total_requested": 4800,
+      "radius_size": 4800,
+      "wall_time_max_s": 0.001071499995305203,
+      "wall_time_median_s": 0.0009499589941697195,
+      "wall_time_min_s": 0.0009257500059902668,
+      "wall_time_s": [
+        0.0009257500059902668,
+        0.0009499589941697195,
+        0.001071499995305203
+      ]
+    },
+    {
+      "flux_sum": 11895.087081785185,
+      "n_shells": 8,
+      "npt_final": 4800,
+      "npt_total_requested": 4800,
+      "radius_size": 4800,
+      "wall_time_max_s": 0.0016970839933492243,
+      "wall_time_median_s": 0.0015644169907318428,
+      "wall_time_min_s": 0.0014942080015316606,
+      "wall_time_s": [
+        0.0014942080015316606,
+        0.0016970839933492243,
+        0.0015644169907318428
+      ]
+    },
+    {
+      "flux_sum": 15647.03013765987,
+      "n_shells": 16,
+      "npt_final": 4800,
+      "npt_total_requested": 4800,
+      "radius_size": 4800,
+      "wall_time_max_s": 0.002595458005089313,
+      "wall_time_median_s": 0.002294582998729311,
+      "wall_time_min_s": 0.0019670419860631227,
+      "wall_time_s": [
+        0.002595458005089313,
+        0.0019670419860631227,
+        0.002294582998729311
+      ]
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+# Create this environment from the repository root:
+#   conda env create -f environment.yml
+#
+# The local package is installed from ./moka3d so that the `moka3d`
+# CLI is available immediately in the environment.
+
+name: moka3d
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - numpy
+  - scipy
+  - matplotlib
+  - astropy
+  - scikit-image
+  - pyyaml
+  - typer
+  - rich
+  - fast-histogram
+  - pytest
+  - pip:
+      - -e ./moka3d

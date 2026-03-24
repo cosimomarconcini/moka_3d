@@ -15,6 +15,7 @@ import logging
 import shutil
 import warnings
 import copy
+import sys
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -34,11 +35,21 @@ from astropy.io import fits
 logger = logging.getLogger(__name__)
 
 
-            
+ACTION_LEVEL = 25
+logging.addLevelName(ACTION_LEVEL, "ACTION")
+
+def action(self, message, *args, **kwargs):
+    if self.isEnabledFor(ACTION_LEVEL):
+        self._log(ACTION_LEVEL, message, args, **kwargs)
+
+logging.Logger.action = action
+
+
 class ColorFormatter(logging.Formatter):
     COLORS = {
         "DEBUG": "\033[36m",      # cyan
         "INFO": "\033[0m",        # normal
+        "ACTION": "\033[32m",     # green
         "WARNING": "\033[33m",    # yellow
         "ERROR": "\033[31m",      # red
         "CRITICAL": "\033[1;31m", # bright red
@@ -47,9 +58,14 @@ class ColorFormatter(logging.Formatter):
     RESET = "\033[0m"
 
     def format(self, record):
-        color = self.COLORS.get(record.levelname, self.RESET)
-        record.levelname = f"{color}{record.levelname}{self.RESET}"
-        return super().format(record)
+        original_levelname = record.levelname
+        color = self.COLORS.get(original_levelname, self.RESET)
+        record.levelname = f"{color}{original_levelname}{self.RESET}"
+        formatted = super().format(record)
+        record.levelname = original_levelname
+        return formatted
+
+
 
 def _setup_logging(output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -63,12 +79,16 @@ def _setup_logging(output_dir: Path) -> None:
     formatter_console = ColorFormatter("%(asctime)s | %(levelname)s | %(message)s")
 
     fh = logging.FileHandler(log_file, mode="w")
+    fh.setLevel(logging.INFO)
     fh.setFormatter(formatter_file)
     logger.addHandler(fh)
 
     sh = logging.StreamHandler()
+    sh.setLevel(logging.INFO)
     sh.setFormatter(formatter_console)
     logger.addHandler(sh)
+
+
 
 
 def _save_summary(summary: dict, output_dir: Path) -> None:
@@ -78,15 +98,20 @@ def _save_summary(summary: dict, output_dir: Path) -> None:
 
 def _disc_zeta_range(cfg):
     if cfg.advanced.disc_zeta_range_mode == "auto_from_psf":
-        return [-cfg.processing.psf_sigma / 2.0, cfg.processing.psf_sigma / 2.0]
+        disc_height = cfg.processing.psf_sigma[0] if len(cfg.processing.psf_sigma)<=1 else max(cfg.processing.psf_sigma)
+        return [-disc_height / 2.0, disc_height / 2.0]
     raise ValueError(f"Unsupported disc_zeta_range_mode: {cfg.advanced.disc_zeta_range_mode}")
 
-def _ask_user_to_continue_after_mask_check(output_path: Path) -> None:
-    print(f"\nMasking preview saved to:\n{output_path}")
-    print("Check the masking figure.")
-    answer = input("Continue with this masking? [y/n]: ").strip().lower()
 
-    if answer not in {"y", "yes", "Y"}:
+def _ask_user_to_continue_after_mask_check(output_path: Path) -> None:
+    logger.action("Check the masking figure saved to:\n%s", output_path)
+
+    logger.action("Continue with this masking? [y/n]: ")
+    sys.stdout.write("")  # ensures no newline issues
+    answer = input().strip().lower()
+
+
+    if answer not in {"y", "yes", "Yes", "Y"}:
         raise RuntimeError(
             "Run stopped by user after masking check. "
             "Edit the YAML file and run again."
@@ -270,7 +295,7 @@ def _plot_escape_fraction_profile(
 
     ax.axhline(1.0, ls="--", lw=1.2, color = 'black')
     ax.set_xlabel(r"Radius [arcsec]", fontsize=14)
-    ax.set_ylabel(r"$v_{\rm out}/(v_{\rm esc})$", fontsize=14)
+    ax.set_ylabel(r"$v_{\rm out}/v_{\rm esc}$", fontsize=14)
     ax.grid(alpha=0.2)
     ax.legend(fontsize=11, loc="best")
 
@@ -560,11 +585,16 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
     )
     finalize_figure(output_dir / "03_PA_estimate.png", show=cfg.output.show_plots)
     if (cfg.fit.component_mode == "disk") and bool(cfg.advanced.check_masking_before_fitting):
-        print(f"\nPA estimate preview saved to:\n{output_dir / '03_PA_estimate.png'}")
-        print("Check the PA estimate figure.")
-        answer = input("Continue with this PA estimate? [y/n]: ").strip().lower()
+        #print(f"\nPA estimate preview saved to:\n{output_dir / '03_PA_estimate.png'}")
+        #print("Check the PA estimate figure.")
+        #answer = input("Continue with this PA estimate? [y/n]: ").strip().lower()
 
-        if answer not in {"y", "yes", "Y"}:
+        logger.action("PA estimate preview saved to: %s", output_dir)
+        logger.action("Continue with this PA? [y/n]: ")
+        sys.stdout.write("")  # ensures no newline issues
+        answer = input().strip().lower()
+
+        if answer not in {"y", "yes", "Yes", "Y"}:
             raise RuntimeError(
                 "Run stopped by user after PA check. "
                 "Edit the YAML file and run again."
@@ -732,7 +762,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
     # Processing/runtime aliases used throughout the old script
     vel = vel_kms
     nrebin = int(cfg.processing.nrebin)
-    psf_sigma = float(cfg.processing.psf_sigma)
+    psf_sigma = cfg.processing.psf_sigma
     lsf_sigma = float(cfg.processing.lsf_sigma)
     vel_sigma = float(cfg.processing.vel_sigma)
     xrange = cfg.processing.xrange
@@ -1290,9 +1320,9 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                 sigrange=sigrange,
                 resid_ranges=resid_ranges,
                 nticks=4,
-                psf_bmaj=psf_sigma,
-                psf_bmin=psf_sigma,
-                psf_pa=12
+                psf_bmaj=psf_sigma[0] if len(psf_sigma)<=1 else psf_sigma[0],
+                psf_bmin=psf_sigma[0] if len(psf_sigma)<=1 else psf_sigma[1],
+                psf_pa=20 if len(psf_sigma)<=1 else psf_sigma[2]
             )
             finalize_figure(output_dir / "012a_mom_maps_comparison_best_fit.png", show=cfg.output.show_plots)
 
@@ -1743,9 +1773,9 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                 sigrange=sigrange,
                 resid_ranges=resid_ranges,
                 nticks=4,
-                psf_bmaj=psf_sigma,
-                psf_bmin=psf_sigma,
-                psf_pa=12
+                psf_bmaj=psf_sigma[0] if len(psf_sigma)<=1 else psf_sigma[0],
+                psf_bmin=psf_sigma[0] if len(psf_sigma)<=1 else psf_sigma[1],
+                psf_pa=20 if len(psf_sigma)<=1 else psf_sigma[2]
             )
             finalize_figure(output_dir / "012b_mom_maps_comparison_best_fit.png", show=cfg.output.show_plots)
 
@@ -2003,9 +2033,9 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
             sigrange=sigrange,
             resid_ranges=resid_ranges,
             nticks=4,
-            psf_bmaj=psf_sigma,
-            psf_bmin=psf_sigma,
-            psf_pa=12
+            psf_bmaj=psf_sigma[0] if len(psf_sigma)<=1 else psf_sigma[0],
+            psf_bmin=psf_sigma[0] if len(psf_sigma)<=1 else psf_sigma[1],
+            psf_pa=20 if len(psf_sigma)<=1 else psf_sigma[2]
         )
         finalize_figure(output_dir / "012c_mom_maps_comparison_best_fit.png", show=cfg.output.show_plots)
 

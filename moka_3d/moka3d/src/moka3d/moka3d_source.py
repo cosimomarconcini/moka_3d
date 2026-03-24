@@ -27,6 +27,7 @@ from matplotlib.patches import Rectangle
 import math
 import os
 import re
+import sys
 import astropy.units as u
 
 from scipy.ndimage import gaussian_filter
@@ -687,8 +688,8 @@ class model(utils):
             print('No spatial convolution')
             self.psf_sigma = None
         else:
-            if isinstance(psf_sigma, int) or isinstance(psf_sigma, float):
-                self.psf_sigma = [psf_sigma, psf_sigma, 0]
+            if isinstance(psf_sigma, list) and len(psf_sigma) == 1:
+                self.psf_sigma = [psf_sigma[0], psf_sigma[0], 0]
             elif isinstance(psf_sigma, list) and len(psf_sigma) == 3:
                 self.psf_sigma = [ psf_sigma[0]/(2*np.sqrt(2*np.log(2))), 
                                     psf_sigma[1]/(2*np.sqrt(2*np.log(2))),
@@ -2451,6 +2452,7 @@ def estimate_pa_from_mom1(
         rng = np.random.default_rng(random_state)
     
         arcsec_per_pix = float(pixscale) * float(nrebin)
+        psf_sigma_arcsec = psf_sigma_arcsec[0] if len(psf_sigma_arcsec)>=1 else psf_sigma_arcsec
     
         # Convert PSF sigma -> FWHM in pixels; set block size ~ FWHM
         if (use_block_bootstrap and psf_sigma_arcsec is not None
@@ -2620,7 +2622,7 @@ def estimate_radius_from_encircled_flux_with_uncertainty(
         return np.nan, np.nan, np.nan, np.array([])
 
     pix_arcsec = float(pixscale_arcsec) * float(nrebin)
-    fwhm_arcsec = 2.355 * float(psf_sigma_arcsec)
+    fwhm_arcsec = 2.355 * float(psf_sigma_arcsec[0])
 
     def _encircled_radius_arcsec(r_pix, w_):
         # sort by radius
@@ -2676,7 +2678,7 @@ def plot_kin_maps_3x3(
     cbar_w=0.012,
     cbar_gap=0.012,
     cbar_vpad=0.015,
-    # --- NEW: PSF overlay on DATA row (row=0) ---
+    # --- PSF overlay on DATA row (row=0) ---
     psf_bmaj=None,          # major axis size (arcsec)
     psf_bmin=None,          # minor axis size (arcsec)
     psf_pa=0,             # position angle of PSF ellipse (deg, CCW from +x in plot coords)
@@ -5926,7 +5928,7 @@ def fit_gridsearch_component(
         phi_range=phi_range,
         zeta_range=zeta_range,
         logradius=bool(logradius),
-        psf_sigma=float(psf_sigma),
+        psf_sigma=psf_sigma,
         lsf_sigma=float(lsf_sigma),
         vel_sigma=float(vel_sigma),
         v_min=float(v_min),

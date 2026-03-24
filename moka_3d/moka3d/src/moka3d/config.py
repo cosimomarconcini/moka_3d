@@ -65,7 +65,7 @@ class ProcessingConfig:
     yrange: Optional[List[float]] = None
     pixel_scale_arcsec_manual: Optional[float] = None
     psf_sigma: float = 1.0
-    lsf_sigma: float = 72.0
+    lsf_sigma: float = 50.0
     vel_sigma: float = 0.0
     display_ranges: dict[str, DisplayRangeConfig] = field(default_factory=dict)
 
@@ -241,7 +241,7 @@ def load_config(path: str | Path) -> AppConfig:
         xrange=proc_raw.get("xrange"),
         yrange=proc_raw.get("yrange"),
         pixel_scale_arcsec_manual=_as_float_or_none(proc_raw.get("pixel_scale_arcsec_manual")),
-        psf_sigma=float(proc_raw.get("psf_sigma", 1.0)),
+        psf_sigma=proc_raw.get("psf_sigma", 1.0),
         lsf_sigma=float(proc_raw.get("lsf_sigma", 72.0)),
         vel_sigma=float(proc_raw.get("vel_sigma", 0.0)),
         display_ranges=display_ranges,
