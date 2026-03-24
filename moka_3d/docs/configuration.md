@@ -127,7 +127,7 @@ Most important fields:
 - `input.sn_map`
   Optional 2D S/N map used for masking.
 - `input.ne_map`
-  Optional 2D density map for energetics.
+  Optional 2D electron density map for energetics.
 - `input.ne_outflow`
   Optional constant electron density value or values for outflow energetics.
 - `input.save_all_outputs`
