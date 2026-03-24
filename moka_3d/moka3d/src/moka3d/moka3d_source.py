@@ -2720,8 +2720,12 @@ def plot_kin_maps_3x3(
     sigg  = np.array(m.maps['sig'],  float)
 
     # ----------------------------------------------------
-    # MODEL pixels that are NaN OR zero -> NaN (so they plot white)
+    # MODEL and DATA pixels that are NaN OR zero -> NaN (so they plot white)
     # ----------------------------------------------------
+    flu[(~np.isfinite(flu)) | (flu <= 0)] = np.nan
+    ve[(~np.isfinite(ve))   | (ve  == 0)] = np.nan
+    si[(~np.isfinite(si))   | (si  == 0)] = np.nan
+
     fluxx[(~np.isfinite(fluxx)) | (fluxx <= 0)] = np.nan
     vell[(~np.isfinite(vell))   | (vell  == 0)] = np.nan
     sigg[(~np.isfinite(sigg))   | (sigg  == 0)] = np.nan
