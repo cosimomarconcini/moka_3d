@@ -37,7 +37,7 @@ def validate(config_path: Path = typer.Argument(..., exists=True, help="YAML con
 def run(config_path: Path = typer.Argument(..., exists=True, help="YAML configuration file")):
     cfg = load_config(config_path)
     run_pipeline(cfg, config_path=config_path)
-    typer.echo("Run completed successfully.")
+    typer.echo("-------------- Run completed successfully --------------")
 
 
 def main():
