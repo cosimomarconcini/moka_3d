@@ -1236,6 +1236,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                 disc_title = fr"DISC: β={disc_fit['beta_best']:.1f}°, $V_{{\max}}$={disc_fit['v_best']:.1f} km s$^{{-1}}$"
             else:
                 disc_title = fr"DISC: β={disc_fit['beta_best']:.1f}°, v={disc_fit['v_best']:.0f} km s$^{{-1}}$"
+            disc_title = f"{disc_title}, PA={float(gamma_disc):.1f}°"
 
 
 
