@@ -93,7 +93,7 @@ The example uses:
 - sample cubes in `Data/`
 - ancillary SN maps in `Ancillary_material/`
 
-When the run completes, a new timestamped directory will appear under:
+When the run starts, a new timestamped directory will appear under:
 
 ```text
 Outputs/YYYY-MM-DD_HHMMSS_<cube_name>/
