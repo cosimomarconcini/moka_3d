@@ -91,7 +91,7 @@ The example uses:
 
 - `config_moka.yaml`
 - sample cubes in `Data/`
-- ancillary maps in `Ancillary_material/`
+- ancillary SN maps in `Ancillary_material/`
 
 When the run completes, a new timestamped directory will appear under:
 
