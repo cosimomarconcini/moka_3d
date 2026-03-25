@@ -2064,6 +2064,22 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         )
         finalize_figure(output_dir / "013_disc_vel_profiles.png", show=cfg.output.show_plots)
 
+        if best_disc_profile is not None:
+            try:
+                km._plot_enclosed_dynamical_mass(
+                    best_disc_profile,
+                    n_shells=num_shells_disc_eff,
+                    num_shells_selected=num_shells_disc,
+                    title="Enclosed dynamical mass",
+                    scale_kpc_per_arcsec=scale,
+                    rin_pix=rin_pix_disc, rout_pix=rout_pix_disc,
+                    arcsec_per_pix=arcsec_per_pix
+                )
+                finalize_figure(output_dir / "013b_disc_enclosed_dynamical_mass.png", show=cfg.output.show_plots)
+                logger.info("Enclosed dynamical mass profile computed and plotted.")
+            except Exception as e:
+                logger.warning("DISC enclosed dynamical mass plot failed: %r", e)
+
 
     best_out_pos_profile = None
     if outflow_fit_pos is not None:
