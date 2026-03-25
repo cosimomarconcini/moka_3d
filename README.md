@@ -68,7 +68,7 @@ Run the example end-to-end:
 
 ```bash
 git clone https://github.com/cosimomarconcini/moka_3d.git
-cd moka3d/moka_3d/
+cd moka_3d/moka_3d/
 python -m pip install -e ./moka3d
 
 # Move into the example directory (required because of relative paths)
