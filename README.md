@@ -20,7 +20,7 @@ Clone the repository:
 
 ```bash
 git clone https://github.com/cosimomarconcini/moka_3d.git
-cd moka_3d
+cd moka_3d/moka_3d/
 ```
 
 ### pip
