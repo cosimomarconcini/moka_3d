@@ -1328,7 +1328,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                 psf_bmin=psf_sigma[0] if len(psf_sigma)<=1 else psf_sigma[1],
                 psf_pa=20 if len(psf_sigma)<=1 else psf_sigma[2]
             )
-            finalize_figure(output_dir / "012a_mom_maps_comparison_best_fit.png", show=cfg.output.show_plots)
+            finalize_figure(output_dir / "12a_mom_maps_comparison_best_fit.png", show=cfg.output.show_plots)
 
 
 
@@ -1781,7 +1781,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                 psf_bmin=psf_sigma[0] if len(psf_sigma)<=1 else psf_sigma[1],
                 psf_pa=20 if len(psf_sigma)<=1 else psf_sigma[2]
             )
-            finalize_figure(output_dir / "012b_mom_maps_comparison_best_fit.png", show=cfg.output.show_plots)
+            finalize_figure(output_dir / "12b_mom_maps_comparison_best_fit.png", show=cfg.output.show_plots)
 
     # =============================================================
     # 5) Final “pack masks” inspection (DISC, OUTFLOW +, OUTFLOW -)
@@ -2041,7 +2041,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
             psf_bmin=psf_sigma[0] if len(psf_sigma)<=1 else psf_sigma[1],
             psf_pa=20 if len(psf_sigma)<=1 else psf_sigma[2]
         )
-        finalize_figure(output_dir / "012c_mom_maps_comparison_best_fit.png", show=cfg.output.show_plots)
+        finalize_figure(output_dir / "12c_mom_maps_comparison_best_fit.png", show=cfg.output.show_plots)
 
 
 
@@ -2063,7 +2063,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
             rin_pix=rin_pix_disc, rout_pix=rout_pix_disc,
             arcsec_per_pix=arcsec_per_pix
         )
-        finalize_figure(output_dir / "013_disc_vel_profiles.png", show=cfg.output.show_plots)
+        finalize_figure(output_dir / "13_disc_vel_profiles.png", show=cfg.output.show_plots)
 
         if best_disc_profile is not None:
             try:
@@ -2076,10 +2076,24 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                     rin_pix=rin_pix_disc, rout_pix=rout_pix_disc,
                     arcsec_per_pix=arcsec_per_pix
                 )
-                finalize_figure(output_dir / "013b_disc_enclosed_dynamical_mass.png", show=cfg.output.show_plots)
+                finalize_figure(output_dir / "13c_disc_enclosed_dynamical_mass.png", show=cfg.output.show_plots)
                 logger.info("Enclosed dynamical mass profile computed and plotted.")
             except Exception as e:
                 logger.warning("DISC enclosed dynamical mass plot failed: %r", e)
+            try:
+                km._plot_enclosed_dynamical_density(
+                    best_disc_profile,
+                    n_shells=num_shells_disc_eff,
+                    num_shells_selected=num_shells_disc,
+                    title="Enclosed dynamical density",
+                    scale_kpc_per_arcsec=scale,
+                    rin_pix=rin_pix_disc, rout_pix=rout_pix_disc,
+                    arcsec_per_pix=arcsec_per_pix
+                )
+                finalize_figure(output_dir / "13d_disc_enclosed_dynamical_density.png", show=cfg.output.show_plots)
+                logger.info("Enclosed dynamical density profile computed and plotted.")
+            except Exception as e:
+                logger.warning("DISC enclosed dynamical density plot failed: %r", e)
 
 
     best_out_pos_profile = None
@@ -2093,7 +2107,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
             rin_pix=rin_pix_out, rout_pix=rout_pix_out,
             arcsec_per_pix=arcsec_per_pix
         )
-        finalize_figure(output_dir / "013_out_plus_vel_profiles.png", show=cfg.output.show_plots)
+        finalize_figure(output_dir / "13a_out_plus_vel_profiles.png", show=cfg.output.show_plots)
 
 
     best_out_neg_profile = None
@@ -2107,25 +2121,25 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
             rin_pix=rin_pix_out, rout_pix=rout_pix_out,
             arcsec_per_pix=arcsec_per_pix
         )
-        finalize_figure(output_dir / "013_out_minus_vel_profiles.png", show=cfg.output.show_plots)
+        finalize_figure(output_dir / "13b_out_minus_vel_profiles.png", show=cfg.output.show_plots)
 
 
     if disc_best2_for_plots is not None and (not USE_GLOBAL_BETA_DISC):
         km.plot_beta_profile(disc_best2_for_plots, num_shells_disc_eff, "Disc inclination",
                              rin_pix_disc, rout_pix_disc, arcsec_per_pix, scale)
-        finalize_figure(output_dir / "014_disc_beta_profile.png", show=cfg.output.show_plots)
+        finalize_figure(output_dir / "14_disc_beta_profile.png", show=cfg.output.show_plots)
 
 
     if out_best2_pos is not None and (not USE_GLOBAL_BETA_OUT):
         km.plot_beta_profile(out_best2_pos, int(np.shape(outflow_fit_pos["chi_squared_map"])[0]),
                              "Outflow (+) inclination", rin_pix_out, rout_pix_out, arcsec_per_pix, scale)
-        finalize_figure(output_dir / "015_outflow_plus_beta_profile.png", show=cfg.output.show_plots)
+        finalize_figure(output_dir / "15_outflow_plus_beta_profile.png", show=cfg.output.show_plots)
 
 
     if out_best2_neg is not None and (not USE_GLOBAL_BETA_OUT):
         km.plot_beta_profile(out_best2_neg, int(np.shape(outflow_fit_neg["chi_squared_map"])[0]),
                              "Outflow (-) inclination", rin_pix_out, rout_pix_out, arcsec_per_pix, scale)
-        finalize_figure(output_dir / "016_outflow_minus_beta_profile.png", show=cfg.output.show_plots)
+        finalize_figure(output_dir / "16_outflow_minus_beta_profile.png", show=cfg.output.show_plots)
 
     # ---- Combined comparison plot: Disc vs Outflow(+) vs Outflow(-) ----
     if (best_disc_profile is not None) and (best_out_pos_profile is not None) and (best_out_neg_profile is not None):
@@ -2444,7 +2458,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                         "compute_energetics=True but no valid outflow energetics profile could be built."
                     )
                 else:
-                    energetics_plot_path = output_dir / "018_outflow_mdot_profile.png"
+                    energetics_plot_path = output_dir / "18_outflow_mdot_profile.png"
                     _plot_outflow_energetics_profile(
                         output_path=energetics_plot_path,
                         scale_kpc_per_arcsec=scale,
@@ -2754,7 +2768,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
 
                 # Save a one-point plot in the single-shell case
                 if (escape_pos is not None) or (escape_neg is not None):
-                    escape_fraction_plot_path = output_dir / "017_escape_fraction_profile.png"
+                    escape_fraction_plot_path = output_dir / "17_escape_fraction_profile.png"
 
                     _plot_escape_fraction_profile(
                         output_path=escape_fraction_plot_path,
@@ -2890,7 +2904,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                         "compute_escape_fraction=True but no valid outflow escape-fraction profile could be built."
                     )
                 else:
-                    escape_fraction_plot_path = output_dir / "017_escape_fraction_profile.png"
+                    escape_fraction_plot_path = output_dir / "17_escape_fraction_profile.png"
 
                     if (escape_pos is not None) and (escape_neg is None):
                         _plot_escape_fraction_profile(
@@ -3239,8 +3253,6 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         _save_summary(summary, output_dir)
 
     return summary
-
-
 
 
 

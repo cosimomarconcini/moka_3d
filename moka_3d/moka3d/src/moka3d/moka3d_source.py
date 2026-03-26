@@ -4103,7 +4103,7 @@ def _plot_enclosed_dynamical_mass(best_dict, n_shells, num_shells_selected, titl
     )
 
     ax.set_xlabel(r"Radius [arcsec]", fontsize=11)
-    ax.set_ylabel(r"log$_{10}$(Enclosed $M_{dyn}$ [$M_\odot$])", fontsize=11)
+    ax.set_ylabel(r"log$_{10}$($M_{dyn}$ [$M_\odot$])", fontsize=11)
     ax.set_title(title, fontsize=11)
     ax.grid(alpha=0.2)
 
@@ -4134,6 +4134,127 @@ def _plot_enclosed_dynamical_mass(best_dict, n_shells, num_shells_selected, titl
     plt.tight_layout()
     if x.size:
         logger.info("Enclosed dynamical mass profile computed and plotted.")
+
+
+
+def _plot_enclosed_dynamical_density(best_dict, n_shells, num_shells_selected, title, scale_kpc_per_arcsec, rin_pix, rout_pix, arcsec_per_pix):
+    if best_dict is None:
+        return
+
+    v_shell = np.asarray(best_dict.get("v", []), float)
+    if v_shell.size == 0:
+        return
+
+    v_err = np.asarray(best_dict.get("v_err", np.full_like(v_shell, np.nan)), float)
+
+    n_shells = int(n_shells)
+    edges_pix = np.linspace(float(rin_pix), float(rout_pix), int(n_shells) + 1)
+    edges_arcsec = edges_pix * float(arcsec_per_pix)
+    r_out_arcsec = edges_arcsec[1:]
+
+    n = int(min(len(r_out_arcsec), len(v_shell), len(v_err)))
+    if n < 1:
+        return
+
+    r_out_arcsec = r_out_arcsec[:n]
+    v_shell = v_shell[:n]
+    v_err = v_err[:n]
+
+    n_sel = int(num_shells_selected)
+    if n_sel < 1:
+        logger.warning("num_shells_selected must be >= 1 for enclosed density plot; skipping.")
+        return
+    if n_sel > n:
+        logger.warning(
+            "num_shells_selected=%d exceeds available shells=%d; using last shell.",
+            int(num_shells_selected), int(n),
+        )
+        n_sel = n
+
+    r_outer_arcsec = edges_arcsec[n_sel]
+
+    r_kpc = r_out_arcsec * float(scale_kpc_per_arcsec)
+    r_pc = r_kpc * 1000.0
+    r_m = (r_kpc * u.kpc).to(u.m).value
+    v_ms = v_shell * 1e3
+
+    mdyn_msun = np.full_like(v_shell, np.nan, dtype=float)
+    mdyn_err_msun = np.full_like(v_shell, np.nan, dtype=float)
+
+    good = np.isfinite(r_m) & (r_m > 0) & np.isfinite(v_ms) & (v_ms > 0)
+    if np.any(good):
+        mdyn_msun[good] = (v_ms[good] ** 2 * r_m[good] / const.G.value) / const.M_sun.value
+        good_err = good & np.isfinite(v_err) & (v_err > 0)
+        if np.any(good_err):
+            mdyn_err_msun[good_err] = np.abs(mdyn_msun[good_err]) * 2.0 * np.abs(v_err[good_err]) / np.abs(v_shell[good_err])
+
+    rho_msun_pc3 = np.full_like(mdyn_msun, np.nan, dtype=float)
+    rho_err_msun_pc3 = np.full_like(mdyn_msun, np.nan, dtype=float)
+
+    good_r = np.isfinite(r_pc) & (r_pc > 0)
+    good_rho = good_r & np.isfinite(mdyn_msun) & (mdyn_msun > 0)
+    if np.any(good_rho):
+        rho_msun_pc3[good_rho] = 3.0 * mdyn_msun[good_rho] / (4.0 * np.pi * r_pc[good_rho]**3)
+        good_rho_err = good_rho & np.isfinite(mdyn_err_msun) & (mdyn_err_msun > 0)
+        if np.any(good_rho_err):
+            rho_err_msun_pc3[good_rho_err] = rho_msun_pc3[good_rho_err] * (mdyn_err_msun[good_rho_err] / mdyn_msun[good_rho_err])
+
+    fig, ax = plt.subplots(figsize=(6.5, 4.8), dpi=300)
+    ax.xaxis.set_minor_locator(AutoMinorLocator(2))
+    ax.yaxis.set_minor_locator(AutoMinorLocator(2))
+    ax.tick_params(axis='both', labelsize=12)
+
+    x = r_out_arcsec[:n_sel]
+    y = rho_msun_pc3[:n_sel]
+    yerr = np.where(np.isfinite(rho_err_msun_pc3[:n_sel]), rho_err_msun_pc3[:n_sel], 0.0)
+    ok = np.isfinite(x) & np.isfinite(y) & (y > 0)
+    x = x[ok]
+    y = y[ok]
+    yerr = yerr[ok]
+
+    logy = np.log10(y)
+    logyerr = np.where(
+        (yerr > 0) & np.isfinite(yerr),
+        yerr / (y * np.log(10.0)),
+        0.0
+    )
+
+    ax.errorbar(
+        x, logy, yerr=logyerr,
+        color='black', fmt="o-", mfc="none", mec="blue", ecolor='black',
+        capsize=4, mew=1., lw=1.
+    )
+
+    ax.set_xlabel(r"Radius [arcsec]", fontsize=11)
+    ax.set_ylabel(r"log$_{10}$($\bar{\rho}_{dyn}$ [$M_\odot\,\mathrm{pc}^{-3}$])", fontsize=11)
+    ax.set_title(title, fontsize=11)
+    ax.grid(alpha=0.2)
+
+    xmax_arc = float(r_out_arcsec[n_sel - 1]) if np.isfinite(r_out_arcsec[n_sel - 1]) else 0.0
+    ax.set_xlim(0.0, xmax_arc * 1.10 if xmax_arc > 0 else 1.0)
+
+    if logy.size:
+        ymax = np.nanmax(logy + np.where(np.isfinite(logyerr), logyerr, 0.0))
+        if np.isfinite(ymax):
+            ymin = np.nanmin(logy - np.where(np.isfinite(logyerr), logyerr, 0.0))
+            if np.isfinite(ymin):
+                pad = 0.05 * max(ymax - ymin, 1.0)
+                ax.set_ylim(ymin - pad, ymax + pad)
+
+    if np.isfinite(r_outer_arcsec):
+        ax.axvline(r_outer_arcsec, color="black", ls="--", lw=0.8, alpha=0.6)
+
+    def a2k(x):
+        return x * float(scale_kpc_per_arcsec)
+
+    def k2a(x):
+        return x / float(scale_kpc_per_arcsec)
+
+    secax = ax.secondary_xaxis("top", functions=(a2k, k2a))
+    secax.set_xlabel("Radius [kpc]", fontsize=11)
+    secax.tick_params(axis='both', labelsize=10)
+
+    plt.tight_layout()
 
 
 
@@ -7429,7 +7550,5 @@ def _save_moment_maps_fits(obs, model, output_path: Path):
     ])
 
     hdul.writeto(output_path, overwrite=True)
-
-
 
 
