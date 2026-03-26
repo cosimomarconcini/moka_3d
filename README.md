@@ -111,7 +111,6 @@ This directory contains:
 - [Quickstart](moka_3d/docs/quickstart.md)
 - [Configuration Guide](moka_3d/docs/configuration.md)
 - [Outputs Guide](moka_3d/docs/outputs.md)
-- [Troubleshooting](moka_3d/docs/troubleshooting.md)
 
 ## Known Limitations
 
