@@ -14,3 +14,8 @@ Initial public release.
 - Quickstart
 - Configuration Guide
 - Output Interpretation Guide
+
+## Recent updates
+- Mar 25, 2026 -- Added enclosed dynamical mass profile for 'disk' and 'disk_then_outflow' fit
+- Mar 26, 2026 -- Added enclosed density profile for 'disk' and 'disk_then_outflow' fit
+
