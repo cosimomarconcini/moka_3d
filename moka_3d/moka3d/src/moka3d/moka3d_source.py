@@ -3769,6 +3769,53 @@ def summarize_independent_shell_fit_with_profiles(chi_squared_map, beta_array, v
     return dict(beta=beta_star, beta_err=beta_err*sigma_scale, v=v_star, v_err=v_err*sigma_scale)
 
 
+def save_best_info_to_fits(fit_result, output_dir, filename="best_fit_per_shell.fits"):
+    """
+    Save fit_result['best'] into a FITS file with a single table extension.
+
+    Columns:
+        v, v_unc, beta, beta_unc
+
+    One row per shell.
+    """
+    best = fit_result["best"]
+
+    v = np.asarray(best["v"], dtype=np.float32)
+    v_unc = np.asarray(best["v_err"], dtype=np.float32)
+
+    # In your summarize_global_beta_with_per_shell_v(), beta and beta_err
+    # are already arrays of length S, one value per shell
+    beta = np.asarray(best["beta"], dtype=np.float32)
+    beta_unc = np.asarray(best["beta_err"], dtype=np.float32)
+
+    # Optional safety check
+    n = len(v)
+    if not (len(v_unc) == len(beta) == len(beta_unc) == n):
+        raise ValueError("best arrays do not all have the same length")
+
+    cols = [
+        fits.Column(name="v",        format="E", unit="km/s", array=v),
+        fits.Column(name="v_err",    format="E", unit="km/s", array=v_unc),
+        fits.Column(name="beta",     format="E", unit="deg",  array=beta),
+        fits.Column(name="beta_err", format="E", unit="deg",  array=beta_unc),
+    ]
+
+    hdu = fits.BinTableHDU.from_columns(cols, name="BEST_FIT")
+
+    # Optional metadata in header
+    hdu.header["GEOMETRY"] = str(fit_result.get("geometry", ""))
+    hdu.header["FMODE"] = str(fit_result.get("FIT_MODE", ""))
+    hdu.header["GAMMA"] = float(fit_result.get("gamma_model", np.nan))
+    hdu.header["APERTURE"] = float(fit_result.get("aperture", np.nan))
+    hdu.header["DBLCONE"] = bool(fit_result.get("double_cone", False))
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    filepath = output_dir / filename
+
+    hdu.writeto(filepath, overwrite=True)
+
+    return filepath
 
 
 def summarize_global_beta_with_per_shell_v(chi_squared_map, beta_array, v_array, sigma_scale=1.0):
@@ -3821,7 +3868,7 @@ def summarize_global_beta_with_per_shell_v(chi_squared_map, beta_array, v_array,
     for s in range(S):
         print(f"Shell {s+1:2d}: v = {v_star[s]:7.1f} ± {(v_err[s]*sigma_scale):.1f} km/s")
 
-    # Pack a 'best' dict compatible with your plotting utilities
+    # Pack a 'best' dict 
     best = dict(
         beta=np.full(S, beta_star),
         beta_err=np.full(S, beta_err),         

@@ -995,6 +995,16 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
             n_geom_v=DISC_N_GEOM_V,
             verbose_label="DISC"
         )
+        fits_path2 = km.save_best_info_to_fits(
+            fit_result= disc_fit,
+            output_dir=output_dir,
+            filename=f"disc_fit_values_per_shell.fits"
+        )
+        logger.info(
+            "DISC fit values saved as %s",
+             "DISC_fit_values_per_shell.fits"
+             )
+        
 
         disc_best_info = km._extract_best_fit_with_uncertainties(disc_fit)
 
@@ -1401,6 +1411,20 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
             v_min=v_min_o, v_max=v_max_o, step_v=step_v_o,
             verbose_label=label
             )
+
+        fits_path = km.save_best_info_to_fits(
+            fit_result=fit,
+            output_dir=output_dir,
+            filename=f"{label}_fit_values_per_shell.fits"
+        )
+        logger.info(
+            "%s fit values saved in %s",
+             label,
+             label + "_fit_values_per_shell.fits"
+             )
+
+
+
         best_info = km._extract_best_fit_with_uncertainties(fit)
         logger.info(
             "%s Global best: beta=%.1f ± %.1f deg, v=%.0f ± %.0f km/s",
