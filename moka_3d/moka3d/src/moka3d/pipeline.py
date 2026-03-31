@@ -998,7 +998,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         fits_path2 = km.save_best_info_to_fits(
             fit_result= disc_fit,
             output_dir=output_dir,
-            filename=f"disc_fit_values_per_shell.fits"
+            filename=f"DISC_fit_values_per_shell.fits"
         )
         logger.info(
             "DISC fit values saved as %s",
