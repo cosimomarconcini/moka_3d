@@ -1,6 +1,6 @@
-<h1 style="display: flex; align-items: center; gap: 10px;">
+<h1 style="display: flex; align-items: center; gap: 50px;">
   <img src="moka_3d/logo_moka3d.png" width="80" height="100">
-  <span style="position: relative; top: -1px;">
+  <span style="position: relative; top: 0px;">
     MOKA<sup>3D</sup>
   </span>
 </h1>
