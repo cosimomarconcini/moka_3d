@@ -1,6 +1,8 @@
-<h1>
-  <img src="moka_3d/logo_moka3d.png" width="80" height="100" style="vertical-align: middle;">
-  MOKA<sup>3D</sup>
+<h1 style="display: flex; align-items: center; gap: 10px;">
+  <img src="moka_3d/logo_moka3d.png" width="80" height="100">
+  <span style="position: relative; top: -10px;">
+    MOKA<sup>3D</sup>
+  </span>
 </h1>
 
 MOKA<sup>3D</sup> is a scientific Python package for 3D kinematic modeling of emission-line gas in spectral cubes. It enables fitting of rotating disks, outflows, and combined disk+outflow systems directly in cube space, producing both kinematic diagnostics and derived physical properties.
