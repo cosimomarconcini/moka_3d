@@ -18,4 +18,5 @@ Initial public release.
 ## Recent updates
 - Mar 25, 2026 -- Added enclosed dynamical mass profile for 'disk' and 'disk_then_outflow' fit
 - Mar 26, 2026 -- Added enclosed density profile for 'disk' and 'disk_then_outflow' fit
+- Mar 31, 2026 -- Added FITS table output of per-shell kinematic properties (v, v_err, β, β_err) after grid-search fitting 
 
