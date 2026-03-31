@@ -1,4 +1,4 @@
-<h1 style="display: flex; align-items: center; gap: 10px;">
+<h1 style="display: flex; align-items: center; gap: 20px;">
   <img src="moka_3d/logo_moka3d.png" width="80" height="100">
   MOKA<sup>3D</sup>
 </h1>
