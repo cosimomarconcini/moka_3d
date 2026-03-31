@@ -1,5 +1,5 @@
-<h1 style="display: flex; align-items: center; gap: 20px;">
-  <img src="moka_3d/logo_moka3d.png" width="80" height="100">
+<h1>
+  <img src="moka_3d/logo_moka3d.png" width="80" height="100" style="vertical-align: middle;">
   MOKA<sup>3D</sup>
 </h1>
 
