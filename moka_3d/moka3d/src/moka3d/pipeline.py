@@ -2447,7 +2447,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                     prof0["edot_hi_erg_s"] = np.nanmax(edot_stack, axis=0)
 
                     return prof0
-
+                
                 fit_bicone_now = (str(OUTFLOW_MASK_MODE).lower() == "bicone") or bool(OUTFLOW_DOUBLE_CONE)
 
                 ne_plus_const = None

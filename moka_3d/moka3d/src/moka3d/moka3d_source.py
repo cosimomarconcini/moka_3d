@@ -7088,10 +7088,6 @@ def save_energetics_table_fits(profile_dict, filename):
     _add_col("DR_ARCSEC", "dr_arcsec")
     _add_col("R_KPC", "r_kpc")
     _add_col("DR_KPC", "dr_kpc")
-
-    _add_col("V_KMS", "v_kms")
-    _add_col("VERR_KMS", "v_err_kms")
-
     _add_col("FLUX", "flux_erg_s_cm2")
     _add_col("LUMINOSITY", "lum_erg_s")
     _add_col("NE_CM3", "ne_cm3")
@@ -7101,14 +7097,16 @@ def save_energetics_table_fits(profile_dict, filename):
     _add_col("EDOT", "edot_erg_s")
     _add_col("NPIX", "npix_shell")
 
+
+    _add_col("MDOT_LO", "mdot_lo_msun_yr")
+    _add_col("MDOT_HI", "mdot_hi_msun_yr")
+    _add_col("MDOT_MID", "mdot_mid_msun_yr")
+
     _add_col("MERR_MSUN", "mass_err_msun")
     _add_col("MDOT_ERR", "mdot_err_msun_yr")
     _add_col("PDOT_ERR", "pdot_err_dyne")
     _add_col("EDOT_ERR", "edot_err_erg_s")
 
-    _add_col("MDOT_LO", "mdot_lo_msun_yr")
-    _add_col("MDOT_HI", "mdot_hi_msun_yr")
-    _add_col("MDOT_MID", "mdot_mid_msun_yr")
 
     hdu_primary = fits.PrimaryHDU()
     hdu_table = fits.BinTableHDU.from_columns(cols, name="ENERGETICS")
