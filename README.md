@@ -148,6 +148,12 @@ archivePrefix = {arXiv},
 
 - [MOKA3D v0.1](moka_3d/docs/release_notes_v0.1.md)
 
+## MOKA<sup>3D</sup> updates
+To stay updated on MOKA<sup>3D</sup> most recent releases, features, and tutorials join the mailing list:
+
+[MOKA<sup>3D</sup> mailing list: ]([https://choosealicense.com/licenses/gpl-3.0/](https://docs.google.com/forms/d/e/1FAIpQLSc9MKXQRyQo5GCDNHGVNM8v8mGoLpBChD8QSnbXpyQBi5wxKw/viewform)) 
+ 
+
 
 ## License
 This project is licensed under the terms of the [GNU General Public License version 3.0](https://choosealicense.com/licenses/gpl-3.0/) license.
