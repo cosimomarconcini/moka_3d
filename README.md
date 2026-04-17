@@ -12,6 +12,12 @@ MOKA<sup>3D</sup> is a scientific Python package for 3D kinematic modeling of em
 - Use a reproducible command-line workflow driven by YAML configuration files.
 - Produce summary tables, diagnostic plots, model cubes, moment maps, and optional energetics outputs.
 
+
+## MOKA<sup>3D</sup> updates
+
+To stay updated on MOKA<sup>3D</sup> most recent releases, features, and tutorials join the [MOKA<sup>3D</sup> mailing list: ](https://docs.google.com/forms/d/e/1FAIpQLSc9MKXQRyQo5GCDNHGVNM8v8mGoLpBChD8QSnbXpyQBi5wxKw/viewform)
+
+
 ## Installation
 
 The installable Python package lives in the `moka3d/` subdirectory of this repository.
@@ -147,10 +153,6 @@ archivePrefix = {arXiv},
 ## Release Notes
 
 - [MOKA3D v0.1](moka_3d/docs/release_notes_v0.1.md)
-
-## MOKA<sup>3D</sup> updates
-To stay updated on MOKA<sup>3D</sup> most recent releases, features, and tutorials join the [MOKA<sup>3D</sup> mailing list: ](https://docs.google.com/forms/d/e/1FAIpQLSc9MKXQRyQo5GCDNHGVNM8v8mGoLpBChD8QSnbXpyQBi5wxKw/viewform)
-
 
 ## License
 This project is licensed under the terms of the [GNU General Public License version 3.0](https://choosealicense.com/licenses/gpl-3.0/) license.
