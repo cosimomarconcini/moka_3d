@@ -866,6 +866,10 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                         "(%.0f deg), so no interactive confirmation is requested.",
                         float(DISC_PA_DEG),
                     )
+            if FIT_COMPONENT_MODE == "outflow":
+                logger.info(
+                        "check_masking_before_fitting=True but Outflow geometry is selected. No interactive confirmation is requested.")
+
             else:
                 _ask_user_to_continue_after_mask_check(mask_preview_path)
 
