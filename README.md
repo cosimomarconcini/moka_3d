@@ -1,6 +1,6 @@
-<h1>
-  <img src="moka_3d/logo_moka3d.png" width="80" height ="100">
-   MOKA<sup>3D</sup>
+<h1 style="display: flex; align-items: flex-start; gap: 10px;">
+  <img src="moka_3d/logo_moka3d.png" width="80" height="100">
+  MOKA<sup>3D</sup>
 </h1>
 
 MOKA<sup>3D</sup> is a scientific Python package for 3D kinematic modeling of emission-line gas in spectral cubes. It enables fitting of rotating disks, outflows, and combined disk+outflow systems directly in cube space, producing both kinematic diagnostics and derived physical properties.
@@ -12,6 +12,12 @@ MOKA<sup>3D</sup> is a scientific Python package for 3D kinematic modeling of em
 - Use a reproducible command-line workflow driven by YAML configuration files.
 - Produce summary tables, diagnostic plots, model cubes, moment maps, and optional energetics outputs.
 
+
+## MOKA<sup>3D</sup> updates
+
+To stay updated on MOKA<sup>3D</sup> most recent releases, features, and tutorials join the [MOKA<sup>3D</sup> mailing list ](https://docs.google.com/forms/d/e/1FAIpQLSc9MKXQRyQo5GCDNHGVNM8v8mGoLpBChD8QSnbXpyQBi5wxKw/viewform)
+
+
 ## Installation
 
 The installable Python package lives in the `moka3d/` subdirectory of this repository.
@@ -20,7 +26,7 @@ Clone the repository:
 
 ```bash
 git clone https://github.com/cosimomarconcini/moka_3d.git
-cd moka_3d
+cd moka_3d/moka_3d/
 ```
 
 ### pip
@@ -68,7 +74,7 @@ Run the example end-to-end:
 
 ```bash
 git clone https://github.com/cosimomarconcini/moka_3d.git
-cd moka3d
+cd moka_3d/moka_3d/
 python -m pip install -e ./moka3d
 
 # Move into the example directory (required because of relative paths)
@@ -91,9 +97,9 @@ The example uses:
 
 - `config_moka.yaml`
 - sample cubes in `Data/`
-- ancillary maps in `Ancillary_material/`
+- ancillary SN maps in `Ancillary_material/`
 
-When the run completes, a new timestamped directory will appear under:
+When the run starts, a new timestamped directory will appear under:
 
 ```text
 Outputs/YYYY-MM-DD_HHMMSS_<cube_name>/
@@ -111,14 +117,13 @@ This directory contains:
 - [Quickstart](moka_3d/docs/quickstart.md)
 - [Configuration Guide](moka_3d/docs/configuration.md)
 - [Outputs Guide](moka_3d/docs/outputs.md)
-- [Troubleshooting](moka_3d/docs/troubleshooting.md)
 
 ## Known Limitations
 
 MOKA<sup>3D</sup> is actively evolving. Current limitations include:
 
 - Runtime can grow substantially with large parameter grids, many shells, and high Monte Carlo sampling.
-- Energetics are limited to supported emission lines ($\mathrm{H}\beta$, $[\mathrm{O III}] 5007\\mathrm{Å}$, $\mathrm{H}\alpha$) and require a valid FITS `BUNIT`.
+- The outflow energetics are limited to supported emission lines ($\mathrm{H}\beta$, $[\mathrm{O III}] 5007\\mathrm{Å}$, $\mathrm{H}\alpha$) and require a valid FITS `BUNIT`.
 - The CLI and YAML configuration define the stable public interface; low-level Python APIs should be considered internal.
 
 ## Citation
@@ -148,7 +153,6 @@ archivePrefix = {arXiv},
 ## Release Notes
 
 - [MOKA3D v0.1](moka_3d/docs/release_notes_v0.1.md)
-
 
 ## License
 This project is licensed under the terms of the [GNU General Public License version 3.0](https://choosealicense.com/licenses/gpl-3.0/) license.
