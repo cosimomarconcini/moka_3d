@@ -7,8 +7,14 @@ input:
   cube_file: NGC7582_test_OIII_smooth.fits
   sn_map: SN_map_NGC7582.fits       
   save_all_outputs: true
-  ne_map: null                  # path to 2D FITS density map in ancillary_dir; null if unavailable
-  ne_outflow: null              # null OR [single_value] OR [ne_plus, ne_minus]
+  save_all_outputs: true
+  ne_map: null                   # path to 2D FITS density map in ancillary_dir; null if unavailable
+  mass_to_light_map: null               # path to 2D FITS M/L map in ancillary_dir (maybe from Homerun); null if unavailable
+  mass_to_light_map_ext: 0
+  mass_to_light_units: Msun_per_1e40_erg_s
+  mass_to_light_is_log: true
+
+  ne_outflow: [300]             # null OR [single_value] OR [ne_plus, ne_minus]
                                 # examples:
                                 # single cone (+): [400]
                                 # single cone (-): [500]
