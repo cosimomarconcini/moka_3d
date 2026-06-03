@@ -329,62 +329,147 @@ def _plot_outflow_energetics_profile(
     neg_profile=None,
     show_plots=False,
 ):
-    fig, ax = plt.subplots(figsize=(6.5, 4.8), dpi=300)
+    fig, axes = plt.subplots(2, 2, figsize=(9.5, 7.2), dpi=300, sharex=True)
+    fig.subplots_adjust(hspace=0.0, wspace=0.28)
+    axes = axes.ravel()
 
-    ax.xaxis.set_minor_locator(AutoMinorLocator(2))
-    ax.yaxis.set_minor_locator(AutoMinorLocator(2))
-    ax.tick_params(which="minor", length=3)
-    ax.tick_params(axis="both", labelsize=12)
+    panels = [
+        ("mass_msun", "mass_err_msun", r"$M_{\rm gas}$ [$M_\odot$]"),
+        ("mdot_msun_yr", "mdot_err_msun_yr", r"$\dot{M}_{\rm out}$ [$M_\odot$ yr$^{-1}$]"),
+        ("edot_erg_s", "edot_err_erg_s", r"$\dot{E}_{\rm kin}$ [erg s$^{-1}$]"),
+        ("pdot_dyne", "pdot_err_dyne", r"$\dot{P}_{\rm out}$ [dyn]"),
+    ]
 
-    def _draw(profile, label):
+    def _draw(ax, profile, label, key, err_key, ls):
         if profile is None:
             return
 
         r = np.asarray(profile["r_arcsec"], dtype=float)
         xerr = 0.5 * np.asarray(profile["dr_arcsec"], dtype=float)
+        y = np.asarray(profile[key], dtype=float)
+        yerr = np.asarray(profile.get(err_key, np.full_like(y, np.nan)), dtype=float)
+        good = np.isfinite(r) & np.isfinite(y) & (y > 0)
+        if not np.any(good):
+            return
 
-        # standard-density fallback: draw shaded band
-        if "mdot_lo_msun_yr" in profile and "mdot_hi_msun_yr" in profile:
-            lo = np.asarray(profile["mdot_lo_msun_yr"], dtype=float)
-            hi = np.asarray(profile["mdot_hi_msun_yr"], dtype=float)
-            mid = np.asarray(profile["mdot_mid_msun_yr"], dtype=float)
+        err_good = np.where(np.isfinite(yerr[good]) & (yerr[good] >= 0), yerr[good], 0.0)
+        ax.errorbar(
+            r[good], y[good], xerr=xerr[good], yerr=err_good,
+            fmt="o", ms=5.5, mfc="none", mec="black", mew=1.1,
+            color="black", ecolor="black", elinewidth=1.0, capsize=3,
+            linestyle=ls, lw=1.1, label=label,
+        )
 
-            good = np.isfinite(r) & np.isfinite(lo) & np.isfinite(hi) & np.isfinite(mid) & (lo > 0) & (hi > 0) & (mid > 0)
-            if np.any(good):
-                ax.fill_between(r[good], lo[good], hi[good], alpha=0.2)
-                ax.errorbar(r[good], mid[good], xerr=xerr[good], fmt="o-", lw=1.5, capsize=4, label=label)
-        else:
-            y = np.asarray(profile["mdot_msun_yr"], dtype=float)
-            good = np.isfinite(r) & np.isfinite(y) & (y > 0)
-            if np.any(good):
-                ax.errorbar(r[good], y[good], xerr=xerr[good], fmt="o-", lw=1.5, capsize=4, label=label)
+    for i, (ax, (key, err_key, ylabel)) in enumerate(zip(axes, panels)):
+        ax.xaxis.set_minor_locator(AutoMinorLocator(2))
+        ax.yaxis.set_minor_locator(AutoMinorLocator(2))
+        ax.tick_params(axis="both", which="both", direction="in", top=True, right=True, labelsize=10)
+        if i < 2:
+            ax.tick_params(axis="x", labelbottom=False)
+        _draw(ax, pos_profile, "Outflow (+)", key, err_key, "-")
+        _draw(ax, neg_profile, "Outflow (-)", key, err_key, "--")
+        ax.set_ylabel(ylabel, fontsize=11)
+        ax.set_yscale("log")
+        ax.grid(alpha=0.2)
 
-    _draw(pos_profile, "Outflow (+)")
-    _draw(neg_profile, "Outflow (-)")
+        xmin, xmax = 0.0, float(radius_range_model_out[1])
+        pad = 0.02 * (xmax - xmin) if xmax > xmin else 0.1
+        ax.set_xlim(xmin, xmax + pad)
 
-    ax.set_xlabel(r"Radius [arcsec]", fontsize=14)
-    ax.set_ylabel(r"$\dot{M}_{\rm out}$ [$M_\odot$ yr$^{-1}$]", fontsize=14)
-    ax.set_yscale("log")
-    ax.grid(alpha=0.2)
-    ax.legend(fontsize=11, loc="best")
+        def a2k(x):
+            return x * float(scale_kpc_per_arcsec)
 
-    xmin, xmax = 0.0, float(radius_range_model_out[1])
-    pad = 0.02 * (xmax - xmin) if xmax > xmin else 0.1
-    ax.set_xlim(xmin, xmax + pad)
+        def k2a(x):
+            return x / float(scale_kpc_per_arcsec)
 
-    def a2k(x):
-        return x * float(scale_kpc_per_arcsec)
+        if i < 2:
+            secax = ax.secondary_xaxis("top", functions=(a2k, k2a))
+            secax.set_xlabel("Radius [kpc]", fontsize=10)
+            secax.tick_params(axis="both", labelsize=9, direction="in")
 
-    def k2a(x):
-        return x / float(scale_kpc_per_arcsec)
-
-    secax = ax.secondary_xaxis("top", functions=(a2k, k2a))
-    secax.set_xlabel("Radius [kpc]", fontsize=14)
-    secax.tick_params(axis="both", labelsize=12)
-
-    plt.tight_layout()
+    axes[2].set_xlabel(r"Radius [arcsec]", fontsize=11)
+    axes[3].set_xlabel(r"Radius [arcsec]", fontsize=11)
+    axes[0].legend(fontsize=9, loc="best")
     finalize_figure(output_path, show=show_plots)
 
+
+
+def _plot_disc_pv_diagram(
+    *,
+    output_path: Path,
+    data_cube,
+    model_cube,
+    velocity_axis,
+    center_xy,
+    pa_deg,
+    arcsec_per_pix,
+    radius_arcsec,
+    show_plots=False,
+):
+    data_cube = np.asarray(data_cube, dtype=float)
+    model_cube = np.asarray(model_cube, dtype=float)
+    velocity_axis = np.asarray(velocity_axis, dtype=float)
+    if data_cube.shape != model_cube.shape or data_cube.ndim != 3:
+        raise ValueError("Data and model cubes must be matching 3D arrays for PV plotting.")
+
+    ny, nx = data_cube.shape[1:]
+    max_pix = max(1, int(round(float(radius_arcsec) / float(arcsec_per_pix))))
+    offsets_pix = np.arange(-max_pix, max_pix + 1, dtype=float)
+    pa_rad = np.deg2rad(float(pa_deg))
+    x0, y0 = center_xy
+    slit_offsets_pix = np.arange(-1, 2, dtype=float)
+
+    data_cols = []
+    model_cols = []
+    offsets_keep = []
+    for off_pix in offsets_pix:
+        xx = np.rint(float(x0) + off_pix * np.sin(pa_rad) + slit_offsets_pix * np.cos(pa_rad)).astype(int)
+        yy = np.rint(float(y0) + off_pix * np.cos(pa_rad) - slit_offsets_pix * np.sin(pa_rad)).astype(int)
+        keep = (xx >= 0) & (xx < nx) & (yy >= 0) & (yy < ny)
+        if not np.any(keep):
+            continue
+        data_cols.append(np.nanmean(data_cube[:, yy[keep], xx[keep]], axis=1))
+        model_cols.append(np.nanmean(model_cube[:, yy[keep], xx[keep]], axis=1))
+        offsets_keep.append(off_pix)
+
+    if not data_cols:
+        raise ValueError("No valid pixels along disc PA for PV plotting.")
+
+    offsets_arcsec = np.asarray(offsets_keep, dtype=float) * float(arcsec_per_pix)
+    data_pv = np.asarray(data_cols, dtype=float).T
+    model_pv = np.asarray(model_cols, dtype=float).T
+
+    fig, axes = plt.subplots(1, 2, figsize=(9.2, 4.2), dpi=300, constrained_layout=True, sharex=True, sharey=True)
+    extent = [float(offsets_arcsec[0]), float(offsets_arcsec[-1]), float(velocity_axis[0]), float(velocity_axis[-1])]
+    finite_data = data_pv[np.isfinite(data_pv)]
+    finite_model = model_pv[np.isfinite(model_pv)]
+    vmax = np.nanpercentile(finite_data, 99.0) if finite_data.size else np.nan
+    levels = np.unique(np.nanpercentile(finite_model, [70, 85, 95])) if finite_model.size else []
+    levels = levels[np.isfinite(levels) & (levels > 0)]
+
+    for ax, pv, title in zip(axes, (data_pv, model_pv), ("DATA", "DISC MODEL")):
+        ax.imshow(
+            pv,
+            origin="lower",
+            aspect="auto",
+            extent=extent,
+            cmap="Blues",
+            vmin=0.0,
+            vmax=vmax if np.isfinite(vmax) and vmax > 0 else None,
+        )
+        if len(levels) > 0:
+            ax.contour(offsets_arcsec, velocity_axis, model_pv, levels=levels, colors="m", linestyles="--", linewidths=0.8)
+        ax.axhline(0.0, color="black", ls=":", lw=0.8)
+        ax.axvline(0.0, color="black", ls=":", lw=0.8)
+        ax.set_title(title, fontsize=12)
+        ax.set_xlabel("Offset [arcsec]", fontsize=11)
+        ax.xaxis.set_minor_locator(AutoMinorLocator(2))
+        ax.yaxis.set_minor_locator(AutoMinorLocator(2))
+        ax.tick_params(axis="both", which="both", direction="in", top=True, right=True, labelsize=10)
+
+    axes[0].set_ylabel(r"Velocity [km s$^{-1}$]", fontsize=11)
+    fig.suptitle(f"Disc PV diagram (PA={float(pa_deg):.1f} deg)", fontsize=13)
+    finalize_figure(output_path, show=show_plots)
 
 
 
@@ -571,23 +656,26 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         psf_sigma_arcsec=cfg.processing.psf_sigma,
     )
 
-    pa_est, pa_est_unc = km.estimate_pa_from_mom1(
-        obs.maps["vel"],
-        center_xy=origin,
-        pixscale=pixscale,
-        nrebin=cfg.processing.nrebin,
-        xlimshow=cfg.processing.xrange,
-        ylimshow=cfg.processing.yrange,
-        psf_sigma_arcsec=cfg.processing.psf_sigma,
-        R_data_arcsec=R_int_arcsec,
-        R_data_err_arcsec=R_int_err,
-        vel_range = velrange
-    )
-    finalize_figure(output_dir / "03_PA_estimate.png", show=cfg.output.show_plots)
+    if cfg.fit.component_mode not in ['outflow']:
+        pa_est, pa_est_unc = km.estimate_pa_from_mom1(
+            obs.maps["vel"],
+            center_xy=origin,
+            pixscale=pixscale,
+            nrebin=cfg.processing.nrebin,
+            xlimshow=cfg.processing.xrange,
+            ylimshow=cfg.processing.yrange,
+            psf_sigma_arcsec=cfg.processing.psf_sigma,
+            R_data_arcsec=R_int_arcsec,
+            R_data_err_arcsec=R_int_err,
+            vel_range = velrange
+        )
+        finalize_figure(output_dir / "03_PA_estimate.png", show=cfg.output.show_plots)
+    else:
+        pa_est, pa_est_unc = 0,0 # Irrelevant for the outflow fit
+        
+         
+    
     if (cfg.fit.component_mode == "disk") and bool(cfg.advanced.check_masking_before_fitting):
-        #print(f"\nPA estimate preview saved to:\n{output_dir / '03_PA_estimate.png'}")
-        #print("Check the PA estimate figure.")
-        #answer = input("Continue with this PA estimate? [y/n]: ").strip().lower()
 
         logger.action("PA estimate preview saved to: %s", output_dir)
         logger.action("Continue with this PA? [y/n]: ")
@@ -749,13 +837,26 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
 
     NE_MAP_NAME = cfg.input.ne_map
     NE_OUTFLOW = cfg.input.ne_outflow
+    ML_MAP_NAME = cfg.input.mass_to_light_map
+    ML_MAP_EXT = int(cfg.input.mass_to_light_map_ext)
+    ML_MAP_UNITS = str(cfg.input.mass_to_light_units)
+    ML_MAP_IS_LOG = bool(cfg.input.mass_to_light_is_log)
     ASSUMED_NE_VALUES = list(cfg.advanced.assumed_ne_values)
     OIII_METALLICITY_Z_OVER_ZSUN = float(cfg.advanced.oiii_metallicity_z_over_zsun)
+    ENERGETICS_FLUX_UNC_FRAC = float(cfg.advanced.energetics_flux_uncertainty_fraction)
+    ENERGETICS_DENSITY_MAP_UNC_FRAC = float(cfg.advanced.energetics_density_map_uncertainty_fraction)
+    ENERGETICS_ML_UNC_FRAC = float(cfg.advanced.energetics_mass_to_light_uncertainty_fraction)
+    NE_OUTFLOW_UNCERTAINTY = cfg.advanced.ne_outflow_uncertainty
     ne_map_2d = None
+    ml_map_2d = None
     if NE_MAP_NAME is not None:
         ne_map_path = Path(cfg.paths.ancillary_dir) / str(NE_MAP_NAME)
         ne_map_2d = km.load_ne_map(ne_map_path)
         logger.info("Density map loaded for energetics: %s", ne_map_path)
+    if ML_MAP_NAME is not None:
+        ml_map_path = Path(cfg.paths.ancillary_dir) / str(ML_MAP_NAME)
+        ml_map_2d = km.load_mass_to_light_map(ml_map_path, ext=ML_MAP_EXT, is_log=ML_MAP_IS_LOG)
+        logger.info("Mass-to-light map loaded for energetics: %s", ml_map_path)
 
 
     
@@ -863,6 +964,10 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                         "(%.0f deg), so no interactive confirmation is requested.",
                         float(DISC_PA_DEG),
                     )
+            if FIT_COMPONENT_MODE == "outflow":
+                logger.info(
+                        "check_masking_before_fitting=True but Outflow geometry is selected. No interactive confirmation is requested.")
+
             else:
                 _ask_user_to_continue_after_mask_check(mask_preview_path)
 
@@ -923,7 +1028,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         obs_disc_fit.plot_kin_maps(flrange=flrange, vrange=velrange, sigrange=sigrange,
                                    xy_AGN=xy_AGN, xrange=xrange, yrange=yrange)
         finalize_figure(output_dir / "02_disc_fit_input_maps.png", show=cfg.output.show_plots)
-        if disc_cfg.pa_deg is None:
+        if disc_cfg.pa_deg is None and FIT_COMPONENT_MODE not in ['outflow']:
             gamma_disc, gamma_disc_unc = km.estimate_pa_from_mom1(
                 obs_disc_fit.maps["vel"],
                 center_xy=origin,
@@ -992,6 +1097,23 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
             n_geom_v=DISC_N_GEOM_V,
             verbose_label="DISC"
         )
+        disc_edges_pix = km.radial_shell_edges_pix(rin_pix_disc, rout_pix_disc, num_shells_disc)
+        disc_r_shell_arcsec = 0.5 * (disc_edges_pix[:-1] + disc_edges_pix[1:]) * arcsec_per_pix
+        disc_dr_shell_arcsec = (disc_edges_pix[1:] - disc_edges_pix[:-1]) * arcsec_per_pix
+        fits_path2 = km.save_best_info_to_fits(
+            fit_result= disc_fit,
+            output_dir=output_dir,
+            filename=f"DISC_fit_values_per_shell.fits",
+            r_shell_arcsec=disc_r_shell_arcsec,
+            dr_shell_arcsec=disc_dr_shell_arcsec,
+            r_shell_kpc=disc_r_shell_arcsec * scale,
+            dr_shell_kpc=disc_dr_shell_arcsec * scale,
+        )
+        logger.info(
+            "DISC fit values saved as %s",
+             "DISC_fit_values_per_shell.fits"
+             )
+        
 
         disc_best_info = km._extract_best_fit_with_uncertainties(disc_fit)
 
@@ -1233,6 +1355,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                 disc_title = fr"DISC: β={disc_fit['beta_best']:.1f}°, $V_{{\max}}$={disc_fit['v_best']:.1f} km s$^{{-1}}$"
             else:
                 disc_title = fr"DISC: β={disc_fit['beta_best']:.1f}°, v={disc_fit['v_best']:.0f} km s$^{{-1}}$"
+            disc_title = f"{disc_title}, PA={float(gamma_disc):.1f}°"
 
 
 
@@ -1252,6 +1375,22 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
 
         except Exception as e:
             logger.warning("DISC overlay failed: %r", e)
+
+        if FIT_COMPONENT_MODE == "disk":
+            try:
+                _plot_disc_pv_diagram(
+                    output_path=output_dir / "disc_pv_diagram.png",
+                    data_cube=obs_disc_fit.cube["data"],
+                    model_cube=model_disc_best.cube["data"],
+                    velocity_axis=vel,
+                    center_xy=origin,
+                    pa_deg=float(gamma_disc),
+                    arcsec_per_pix=arcsec_per_pix,
+                    radius_arcsec=radius_range_model_disc[1],
+                    show_plots=cfg.output.show_plots,
+                )
+            except Exception as e:
+                logger.warning("DISC PV diagram failed: %r", e)
 
 
         disc_y_label = {
@@ -1324,7 +1463,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                 psf_bmin=psf_sigma[0] if len(psf_sigma)<=1 else psf_sigma[1],
                 psf_pa=20 if len(psf_sigma)<=1 else psf_sigma[2]
             )
-            finalize_figure(output_dir / "012a_mom_maps_comparison_best_fit.png", show=cfg.output.show_plots)
+            finalize_figure(output_dir / "12a_mom_maps_comparison_best_fit.png", show=cfg.output.show_plots)
 
 
 
@@ -1397,6 +1536,28 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
             v_min=v_min_o, v_max=v_max_o, step_v=step_v_o,
             verbose_label=label
             )
+
+        out_edges_pix = km.radial_shell_edges_pix(rin_pix_out, rout_pix_out, num_shells_out)
+        out_r_shell_arcsec = 0.5 * (out_edges_pix[:-1] + out_edges_pix[1:]) * arcsec_per_pix
+        out_dr_shell_arcsec = (out_edges_pix[1:] - out_edges_pix[:-1]) * arcsec_per_pix
+        fit_values_filename = "outflow_pos_fit_values_per_shell.fits" if "+" in label else "outflow_neg_fit_values_per_shell.fits"
+        fits_path = km.save_best_info_to_fits(
+            fit_result=fit,
+            output_dir=output_dir,
+            filename=fit_values_filename,
+            r_shell_arcsec=out_r_shell_arcsec,
+            dr_shell_arcsec=out_dr_shell_arcsec,
+            r_shell_kpc=out_r_shell_arcsec * scale,
+            dr_shell_kpc=out_dr_shell_arcsec * scale,
+        )
+        logger.info(
+            "%s fit values saved in %s",
+             label,
+             fit_values_filename
+             )
+
+
+
         best_info = km._extract_best_fit_with_uncertainties(fit)
         logger.info(
             "%s Global best: beta=%.1f ± %.1f deg, v=%.0f ± %.0f km/s",
@@ -1777,7 +1938,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                 psf_bmin=psf_sigma[0] if len(psf_sigma)<=1 else psf_sigma[1],
                 psf_pa=20 if len(psf_sigma)<=1 else psf_sigma[2]
             )
-            finalize_figure(output_dir / "012b_mom_maps_comparison_best_fit.png", show=cfg.output.show_plots)
+            finalize_figure(output_dir / "12b_mom_maps_comparison_best_fit.png", show=cfg.output.show_plots)
 
     # =============================================================
     # 5) Final “pack masks” inspection (DISC, OUTFLOW +, OUTFLOW -)
@@ -2037,7 +2198,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
             psf_bmin=psf_sigma[0] if len(psf_sigma)<=1 else psf_sigma[1],
             psf_pa=20 if len(psf_sigma)<=1 else psf_sigma[2]
         )
-        finalize_figure(output_dir / "012c_mom_maps_comparison_best_fit.png", show=cfg.output.show_plots)
+        finalize_figure(output_dir / "12c_mom_maps_comparison_best_fit.png", show=cfg.output.show_plots)
 
 
 
@@ -2059,7 +2220,37 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
             rin_pix=rin_pix_disc, rout_pix=rout_pix_disc,
             arcsec_per_pix=arcsec_per_pix
         )
-        finalize_figure(output_dir / "013_disc_vel_profiles.png", show=cfg.output.show_plots)
+        finalize_figure(output_dir / "13_disc_vel_profiles.png", show=cfg.output.show_plots)
+
+        if best_disc_profile is not None:
+            try:
+                km._plot_enclosed_dynamical_mass(
+                    best_disc_profile,
+                    n_shells=num_shells_disc_eff,
+                    num_shells_selected=num_shells_disc,
+                    title="Enclosed dynamical mass",
+                    scale_kpc_per_arcsec=scale,
+                    rin_pix=rin_pix_disc, rout_pix=rout_pix_disc,
+                    arcsec_per_pix=arcsec_per_pix
+                )
+                finalize_figure(output_dir / "13c_disc_enclosed_dynamical_mass.png", show=cfg.output.show_plots)
+                logger.info("Enclosed dynamical mass profile computed and plotted.")
+            except Exception as e:
+                logger.warning("DISC enclosed dynamical mass plot failed: %r", e)
+            try:
+                km._plot_enclosed_dynamical_density(
+                    best_disc_profile,
+                    n_shells=num_shells_disc_eff,
+                    num_shells_selected=num_shells_disc,
+                    title="Enclosed dynamical density",
+                    scale_kpc_per_arcsec=scale,
+                    rin_pix=rin_pix_disc, rout_pix=rout_pix_disc,
+                    arcsec_per_pix=arcsec_per_pix
+                )
+                finalize_figure(output_dir / "13d_disc_enclosed_dynamical_density.png", show=cfg.output.show_plots)
+                logger.info("Enclosed dynamical density profile computed and plotted.")
+            except Exception as e:
+                logger.warning("DISC enclosed dynamical density plot failed: %r", e)
 
 
     best_out_pos_profile = None
@@ -2073,7 +2264,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
             rin_pix=rin_pix_out, rout_pix=rout_pix_out,
             arcsec_per_pix=arcsec_per_pix
         )
-        finalize_figure(output_dir / "013_out_plus_vel_profiles.png", show=cfg.output.show_plots)
+        finalize_figure(output_dir / "13a_out_plus_vel_profiles.png", show=cfg.output.show_plots)
 
 
     best_out_neg_profile = None
@@ -2087,25 +2278,25 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
             rin_pix=rin_pix_out, rout_pix=rout_pix_out,
             arcsec_per_pix=arcsec_per_pix
         )
-        finalize_figure(output_dir / "013_out_minus_vel_profiles.png", show=cfg.output.show_plots)
+        finalize_figure(output_dir / "13b_out_minus_vel_profiles.png", show=cfg.output.show_plots)
 
 
     if disc_best2_for_plots is not None and (not USE_GLOBAL_BETA_DISC):
         km.plot_beta_profile(disc_best2_for_plots, num_shells_disc_eff, "Disc inclination",
                              rin_pix_disc, rout_pix_disc, arcsec_per_pix, scale)
-        finalize_figure(output_dir / "014_disc_beta_profile.png", show=cfg.output.show_plots)
+        finalize_figure(output_dir / "14_disc_beta_profile.png", show=cfg.output.show_plots)
 
 
     if out_best2_pos is not None and (not USE_GLOBAL_BETA_OUT):
         km.plot_beta_profile(out_best2_pos, int(np.shape(outflow_fit_pos["chi_squared_map"])[0]),
                              "Outflow (+) inclination", rin_pix_out, rout_pix_out, arcsec_per_pix, scale)
-        finalize_figure(output_dir / "015_outflow_plus_beta_profile.png", show=cfg.output.show_plots)
+        finalize_figure(output_dir / "15_outflow_plus_beta_profile.png", show=cfg.output.show_plots)
 
 
     if out_best2_neg is not None and (not USE_GLOBAL_BETA_OUT):
         km.plot_beta_profile(out_best2_neg, int(np.shape(outflow_fit_neg["chi_squared_map"])[0]),
                              "Outflow (-) inclination", rin_pix_out, rout_pix_out, arcsec_per_pix, scale)
-        finalize_figure(output_dir / "016_outflow_minus_beta_profile.png", show=cfg.output.show_plots)
+        finalize_figure(output_dir / "16_outflow_minus_beta_profile.png", show=cfg.output.show_plots)
 
     # ---- Combined comparison plot: Disc vs Outflow(+) vs Outflow(-) ----
     if (best_disc_profile is not None) and (best_out_pos_profile is not None) and (best_out_neg_profile is not None):
@@ -2272,7 +2463,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                 def _fallback_density_array(profile_len, ne_scalar):
                     return np.full(int(profile_len), float(ne_scalar), dtype=float)
 
-                def _build_one_lobe_energetics(obs_lobe, best2_profile, sign_label, fallback_ne=None):
+                def _build_one_lobe_energetics(obs_lobe, best2_profile, sign_label, fallback_ne=None, fallback_ne_unc=None):
                     if (obs_lobe is None) or (best2_profile is None):
                         return None
 
@@ -2286,20 +2477,45 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                     if vel_prof is None:
                         return None
 
+                    lobe_shape = obs_lobe.cube["data"].shape[1:]
+                    safe_sign = "pos" if sign_label == "+" else "neg"
                     r_edges_pix = km.radial_shell_edges_pix(rin_pix_out, rout_pix_out, num_shells_out)
                     shell_masks = km.radial_shell_masks_yx(
-                        shape_yx=obs_lobe.cube["data"].shape[1:],
+                        shape_yx=lobe_shape,
                         center_xy=origin,
                         r_edges_pix=r_edges_pix,
                         extra_mask=None,
                     )
 
                     if ne_map_2d is not None:
-                        ne_shell = km.shell_density_from_map(ne_map_2d, shell_masks, reducer="median")
+                        if ne_map_2d.shape != lobe_shape:
+                            raise ValueError(
+                                f"Density map shape {ne_map_2d.shape} does not match flux map shape {lobe_shape}."
+                            )
+
+                        ne_map_use = np.array(ne_map_2d, dtype=float, copy=True)
 
                         if fallback_ne is not None:
-                            bad = ~np.isfinite(ne_shell) | (ne_shell <= 0)
-                            ne_shell[bad] = float(fallback_ne)
+                            bad = ~np.isfinite(ne_map_use) | (ne_map_use <= 0)
+                            ne_map_use[bad] = float(fallback_ne)
+
+                        ne_shell = km.shell_density_from_map(ne_map_use, shell_masks, reducer="median")
+
+                        luminosity_map = km.line_luminosity_map_from_cube(
+                            cube_data=obs_lobe.cube["data"],
+                            dv_kms=dv_kms,
+                            lambda_obs_angstrom=lambda_obs_ang,
+                            luminosity_distance_mpc=D_L.to_value("Mpc"),
+                            flux_unit_scale=flux_unit_scale,
+                        )
+                        mass_map = km.mass_map_from_density_map(
+                            line_id=line_id,
+                            luminosity_map_erg_s=luminosity_map,
+                            ne_map_cm3=ne_map_use,
+                            z_over_zsun=OIII_METALLICITY_Z_OVER_ZSUN,
+                        )
+                        mass_shell = km.shell_mass_profile_from_mass_map(mass_map, shell_masks)
+                        mass_err_shell = np.abs(mass_shell) * np.sqrt(ENERGETICS_FLUX_UNC_FRAC**2 + ENERGETICS_DENSITY_MAP_UNC_FRAC**2)
 
                         prof = km.build_outflow_energetics_profile(
                             cube_data=obs_lobe.cube["data"],
@@ -2317,12 +2533,86 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                             line_id=line_id,
                             z_over_zsun=OIII_METALLICITY_Z_OVER_ZSUN,
                             flux_unit_scale=flux_unit_scale,
+                            mass_shell=mass_shell,
+                            mass_err_shell=mass_err_shell,
+                            flux_uncertainty_fraction=ENERGETICS_FLUX_UNC_FRAC,
                         )
                         prof["density_mode"] = "map"
+                        prof["mass_estimator"] = "density_map"
+                        try:
+                            km.save_gas_mass_map_fits(
+                                mass_map,
+                                obs_lobe,
+                                output_dir / f"gas_mass_map_{safe_sign}.fits",
+                                estimator="density",
+                            )
+                        except Exception as e:
+                            logger.warning("Failed to save gas mass map (%s): %r", sign_label, e)
+                        return prof
+
+                    if ml_map_2d is not None:
+                        if ml_map_2d.shape != lobe_shape:
+                            raise ValueError(
+                                f"Mass-to-light map shape {ml_map_2d.shape} does not match flux map shape {lobe_shape}."
+                            )
+
+                        luminosity_map = km.line_luminosity_map_from_cube(
+                            cube_data=obs_lobe.cube["data"],
+                            dv_kms=dv_kms,
+                            lambda_obs_angstrom=lambda_obs_ang,
+                            luminosity_distance_mpc=D_L.to_value("Mpc"),
+                            flux_unit_scale=flux_unit_scale,
+                        )
+                        mass_map = km.mass_map_from_mass_to_light(
+                            luminosity_map_erg_s=luminosity_map,
+                            ml_map=ml_map_2d,
+                            units=ML_MAP_UNITS,
+                        )
+                        mass_shell = km.shell_mass_profile_from_mass_map(mass_map, shell_masks)
+                        mass_err_shell = np.abs(mass_shell) * np.sqrt(ENERGETICS_FLUX_UNC_FRAC**2 + ENERGETICS_ML_UNC_FRAC**2)
+
+                        prof = km.build_outflow_energetics_profile(
+                            cube_data=obs_lobe.cube["data"],
+                            center_xy=origin,
+                            rmin_pix=rin_pix_out,
+                            rmax_pix=rout_pix_out,
+                            n_shells=num_shells_out,
+                            arcsec_per_pix=arcsec_per_pix,
+                            scale_kpc_per_arcsec=scale,
+                            dv_kms=dv_kms,
+                            lambda_obs_angstrom=lambda_obs_ang,
+                            luminosity_distance_mpc=D_L.to_value("Mpc"),
+                            velocity_profile=vel_prof,
+                            ne_shell=None,
+                            line_id=line_id,
+                            z_over_zsun=OIII_METALLICITY_Z_OVER_ZSUN,
+                            flux_unit_scale=flux_unit_scale,
+                            mass_shell=mass_shell,
+                            mass_err_shell=mass_err_shell,
+                            flux_uncertainty_fraction=ENERGETICS_FLUX_UNC_FRAC,
+                        )
+                        prof["density_mode"] = "mass_to_light_map"
+                        prof["mass_estimator"] = "mass_to_light"
+                        prof["mass_to_light_units"] = ML_MAP_UNITS
+                        prof["mass_to_light_is_log"] = ML_MAP_IS_LOG
+                        try:
+                            km.save_gas_mass_map_fits(
+                                mass_map,
+                                obs_lobe,
+                                output_dir / f"gas_mass_map_{safe_sign}.fits",
+                                estimator="mass_to_light",
+                                ml_units=ML_MAP_UNITS,
+                                ml_norm_erg_s=1.0e40,
+                            )
+                        except Exception as e:
+                            logger.warning("Failed to save gas mass map (%s): %r", sign_label, e)
                         return prof
 
                     if fallback_ne is not None:
                         ne_shell = _fallback_density_array(len(vel_prof["v"]), fallback_ne)
+                        if fallback_ne_unc is None:
+                            fallback_ne_unc = float(fallback_ne) * ENERGETICS_DENSITY_MAP_UNC_FRAC
+                        ne_err_shell = _fallback_density_array(len(vel_prof["v"]), fallback_ne_unc)
 
                         prof = km.build_outflow_energetics_profile(
                             cube_data=obs_lobe.cube["data"],
@@ -2337,9 +2627,11 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                             luminosity_distance_mpc=D_L.to_value("Mpc"),
                             velocity_profile=vel_prof,
                             ne_shell=ne_shell,
+                            ne_err_shell=ne_err_shell,
                             line_id=line_id,
                             z_over_zsun=OIII_METALLICITY_Z_OVER_ZSUN,
                             flux_unit_scale=flux_unit_scale,
+                            flux_uncertainty_fraction=ENERGETICS_FLUX_UNC_FRAC,
                         )
                         prof["density_mode"] = "constant"
                         return prof
@@ -2363,6 +2655,8 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                             line_id=line_id,
                             z_over_zsun=OIII_METALLICITY_Z_OVER_ZSUN,
                             flux_unit_scale=flux_unit_scale,
+                            flux_uncertainty_fraction=ENERGETICS_FLUX_UNC_FRAC,
+                            density_uncertainty_fraction=ENERGETICS_DENSITY_MAP_UNC_FRAC,
                         )
                         assumed_profiles.append((float(ne_assumed), pp))
 
@@ -2389,27 +2683,37 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                     prof0["edot_hi_erg_s"] = np.nanmax(edot_stack, axis=0)
 
                     return prof0
-
+                
                 fit_bicone_now = (str(OUTFLOW_MASK_MODE).lower() == "bicone") or bool(OUTFLOW_DOUBLE_CONE)
 
                 ne_plus_const = None
                 ne_minus_const = None
+                ne_plus_unc = None
+                ne_minus_unc = None
 
                 if NE_OUTFLOW is not None:
                     if fit_bicone_now:
                         ne_plus_const = float(NE_OUTFLOW[0])
                         ne_minus_const = float(NE_OUTFLOW[1])
+                        if NE_OUTFLOW_UNCERTAINTY is not None:
+                            ne_plus_unc = float(NE_OUTFLOW_UNCERTAINTY[0])
+                            ne_minus_unc = float(NE_OUTFLOW_UNCERTAINTY[1])
                     else:
                         if OUTFLOW_AXIS_SIGN >= 0:
                             ne_plus_const = float(NE_OUTFLOW[0])
+                            if NE_OUTFLOW_UNCERTAINTY is not None:
+                                ne_plus_unc = float(NE_OUTFLOW_UNCERTAINTY[0])
                         else:
                             ne_minus_const = float(NE_OUTFLOW[0])
+                            if NE_OUTFLOW_UNCERTAINTY is not None:
+                                ne_minus_unc = float(NE_OUTFLOW_UNCERTAINTY[0])
 
                 energetics_pos = _build_one_lobe_energetics(
                     obs_lobe=obs_out_pos,
                     best2_profile=out_best2_pos,
                     sign_label="+",
                     fallback_ne=ne_plus_const,
+                    fallback_ne_unc=ne_plus_unc,
                 )
 
                 energetics_neg = _build_one_lobe_energetics(
@@ -2417,6 +2721,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                     best2_profile=out_best2_neg,
                     sign_label="-",
                     fallback_ne=ne_minus_const,
+                    fallback_ne_unc=ne_minus_unc,
                 )
 
                 if (energetics_pos is None) and (energetics_neg is None):
@@ -2424,7 +2729,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                         "compute_energetics=True but no valid outflow energetics profile could be built."
                     )
                 else:
-                    energetics_plot_path = output_dir / "018_outflow_mdot_profile.png"
+                    energetics_plot_path = output_dir / "18_outflow_energetics_profiles.png"
                     _plot_outflow_energetics_profile(
                         output_path=energetics_plot_path,
                         scale_kpc_per_arcsec=scale,
@@ -2734,7 +3039,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
 
                 # Save a one-point plot in the single-shell case
                 if (escape_pos is not None) or (escape_neg is not None):
-                    escape_fraction_plot_path = output_dir / "017_escape_fraction_profile.png"
+                    escape_fraction_plot_path = output_dir / "17_escape_fraction_profile.png"
 
                     _plot_escape_fraction_profile(
                         output_path=escape_fraction_plot_path,
@@ -2870,7 +3175,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                         "compute_escape_fraction=True but no valid outflow escape-fraction profile could be built."
                     )
                 else:
-                    escape_fraction_plot_path = output_dir / "017_escape_fraction_profile.png"
+                    escape_fraction_plot_path = output_dir / "17_escape_fraction_profile.png"
 
                     if (escape_pos is not None) and (escape_neg is None):
                         _plot_escape_fraction_profile(
@@ -3219,8 +3524,3 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
         _save_summary(summary, output_dir)
 
     return summary
-
-
-
-
-

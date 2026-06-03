@@ -32,8 +32,7 @@ import astropy.units as u
 
 from scipy.ndimage import gaussian_filter
 from rich.progress import Progress, BarColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
-import logging
-logger = logging.getLogger(__name__)
+
 
 from astropy.wcs import WCS
 from astropy.coordinates import SkyCoord
@@ -46,6 +45,58 @@ from matplotlib.ticker import AutoMinorLocator
 import json
 
 from .plotting import finalize_figure
+import logging
+logger = logging.getLogger(__name__)
+
+ACTION_LEVEL = 25
+logging.addLevelName(ACTION_LEVEL, "ACTION")
+
+def action(self, message, *args, **kwargs):
+    if self.isEnabledFor(ACTION_LEVEL):
+        self._log(ACTION_LEVEL, message, args, **kwargs)
+
+logging.Logger.action = action
+
+
+class ColorFormatter(logging.Formatter):
+    COLORS = {
+        "DEBUG": "\033[36m",
+        "INFO": "\033[0m",
+        "ACTION": "\033[32m",
+        "WARNING": "\033[33m",
+        "ERROR": "\033[31m",
+        "CRITICAL": "\033[1;31m",
+    }
+    RESET = "\033[0m"
+
+    def format(self, record):
+        color = self.COLORS.get(record.levelname, self.RESET)
+        formatted = super().format(record)
+        return f"{color}{formatted}{self.RESET}"
+
+
+def _setup_logging(output_dir: Path) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    log_file = output_dir / "moka3d.log"
+
+    logger.setLevel(logging.INFO)
+    logger.handlers.clear()
+    logger.propagate = False
+
+    formatter_file = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
+    formatter_console = ColorFormatter("%(asctime)s | %(levelname)s | %(message)s")
+
+    fh = logging.FileHandler(log_file, mode="w")
+    fh.setLevel(logging.INFO)
+    fh.setFormatter(formatter_file)
+    logger.addHandler(fh)
+
+    sh = logging.StreamHandler()
+    sh.setLevel(logging.INFO)
+    sh.setFormatter(formatter_console)
+    logger.addHandler(sh)
+
+
 
 
 class utils():
@@ -695,7 +746,8 @@ class model(utils):
                                     psf_sigma[1]/(2*np.sqrt(2*np.log(2))),
                                     np.radians(psf_sigma[2]+90) ]
             else:
-                sys.exit('psf_sigma either 1 or 3 elements')
+                logger.critical('The PSF must be either 1 or 3 elements')
+                sys.exit()
        
 
         if lsf_sigma is None:
@@ -2720,8 +2772,12 @@ def plot_kin_maps_3x3(
     sigg  = np.array(m.maps['sig'],  float)
 
     # ----------------------------------------------------
-    # MODEL pixels that are NaN OR zero -> NaN (so they plot white)
+    # MODEL and DATA pixels that are NaN OR zero -> NaN (so they plot white)
     # ----------------------------------------------------
+    flu[(~np.isfinite(flu)) | (flu <= 0)] = np.nan
+    ve[(~np.isfinite(ve))   | (ve  == 0)] = np.nan
+    si[(~np.isfinite(si))   | (si  == 0)] = np.nan
+
     fluxx[(~np.isfinite(fluxx)) | (fluxx <= 0)] = np.nan
     vell[(~np.isfinite(vell))   | (vell  == 0)] = np.nan
     sigg[(~np.isfinite(sigg))   | (sigg  == 0)] = np.nan
@@ -3713,6 +3769,80 @@ def summarize_independent_shell_fit_with_profiles(chi_squared_map, beta_array, v
     return dict(beta=beta_star, beta_err=beta_err*sigma_scale, v=v_star, v_err=v_err*sigma_scale)
 
 
+def save_best_info_to_fits(
+    fit_result,
+    output_dir,
+    filename="best_fit_per_shell.fits",
+    r_shell_arcsec=None,
+    dr_shell_arcsec=None,
+    r_shell_kpc=None,
+    dr_shell_kpc=None,
+):
+    """
+    Save fit_result['best'] into a FITS file with a single table extension.
+
+    Columns:
+        v, v_unc, beta, beta_unc
+
+    One row per shell.
+    """
+    best = fit_result["best"]
+
+    v = np.asarray(best.get("v", np.nan), dtype=np.float32)
+    v_unc = np.asarray(best.get("v_err", np.nan), dtype=np.float32)
+
+    # In your summarize_global_beta_with_per_shell_v(), beta and beta_err
+    # are already arrays of length S, one value per shell
+    beta = np.asarray(best.get("beta", np.nan), dtype=np.float32)
+    beta_unc = np.asarray(best.get("beta_err", np.nan), dtype=np.float32)
+
+    # Skip if v/beta are not present (like e.g. in keplerian mode)
+    if np.ndim(v) == 0 or np.ndim(beta) == 0:
+        return None
+
+    # Optional safety check
+    n = len(v)
+   
+    if not (len(v_unc) == len(beta_unc) == n):
+        raise ValueError("best arrays do not all have the same length")
+
+
+    cols = [
+        fits.Column(name="v",        format="E", unit="km s-1", array=v),
+        fits.Column(name="v_err",    format="E", unit="km s-1", array=v_unc),
+        fits.Column(name="beta",     format="E", unit="deg",  array=beta),
+        fits.Column(name="beta_err", format="E", unit="deg",  array=beta_unc),
+    ]
+
+    def _add_shell_col(name, values, unit):
+        if values is None:
+            return
+        arr = np.asarray(values, dtype=np.float32)
+        if arr.ndim != 1 or len(arr) != n:
+            raise ValueError(f"{name} must be a 1D array with length {n}")
+        cols.append(fits.Column(name=name, format="E", unit=unit, array=arr))
+
+    _add_shell_col("R_ARCSEC", r_shell_arcsec, "arcsec")
+    _add_shell_col("DR_ARCSEC", dr_shell_arcsec, "arcsec")
+    _add_shell_col("R_KPC", r_shell_kpc, "kpc")
+    _add_shell_col("DR_KPC", dr_shell_kpc, "kpc")
+
+    hdu = fits.BinTableHDU.from_columns(cols, name="BEST_FIT")
+
+    # Optional metadata in header
+    hdu.header["GEOMETRY"] = str(fit_result.get("geometry", ""))
+    hdu.header["FMODE"] = str(fit_result.get("FIT_MODE", ""))
+    hdu.header["GAMMA"] = float(fit_result.get("gamma_model", np.nan))
+    hdu.header["APERTURE"] = float(fit_result.get("aperture", np.nan))
+    hdu.header["DBLCONE"] = bool(fit_result.get("double_cone", False))
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    filepath = output_dir / filename
+
+    hdu.writeto(filepath, overwrite=True)
+
+    return filepath
 
 
 def summarize_global_beta_with_per_shell_v(chi_squared_map, beta_array, v_array, sigma_scale=1.0):
@@ -3765,7 +3895,7 @@ def summarize_global_beta_with_per_shell_v(chi_squared_map, beta_array, v_array,
     for s in range(S):
         print(f"Shell {s+1:2d}: v = {v_star[s]:7.1f} ± {(v_err[s]*sigma_scale):.1f} km/s")
 
-    # Pack a 'best' dict compatible with your plotting utilities
+    # Pack a 'best' dict 
     best = dict(
         beta=np.full(S, beta_star),
         beta_err=np.full(S, beta_err),         
@@ -3967,6 +4097,238 @@ def _plot_v_profile(best_dict, n_shells, title, scale_kpc_per_arcsec, rin_pix, r
 
     plt.tight_layout()
 
+
+
+
+def _plot_enclosed_dynamical_mass(best_dict, n_shells, num_shells_selected, title, scale_kpc_per_arcsec, rin_pix, rout_pix, arcsec_per_pix):
+    if best_dict is None:
+        return
+
+    v_shell = np.asarray(best_dict.get("v", []), float)
+    if v_shell.size == 0:
+        return
+
+    v_err = np.asarray(best_dict.get("v_err", np.full_like(v_shell, np.nan)), float)
+
+    n_shells = int(n_shells)
+    edges_pix = np.linspace(float(rin_pix), float(rout_pix), int(n_shells) + 1)
+    edges_arcsec = edges_pix * float(arcsec_per_pix)
+    r_out_arcsec = edges_arcsec[1:]
+
+    n = int(min(len(r_out_arcsec), len(v_shell), len(v_err)))
+    if n < 1:
+        return
+
+    r_out_arcsec = r_out_arcsec[:n]
+    v_shell = v_shell[:n]
+    v_err = v_err[:n]
+
+    n_sel = int(num_shells_selected)
+    if n_sel < 1:
+        logger.warning("num_shells_selected must be >= 1 for enclosed mass plot; skipping.")
+        return
+    if n_sel > n:
+        logger.warning(
+            "num_shells_selected=%d exceeds available shells=%d; using last shell.",
+            int(num_shells_selected), int(n),
+        )
+        n_sel = n
+
+    r_outer_arcsec = edges_arcsec[n_sel]
+
+    r_kpc = r_out_arcsec * float(scale_kpc_per_arcsec)
+    r_m = (r_kpc * u.kpc).to(u.m).value
+    v_ms = v_shell * 1e3
+
+    mdyn_msun = np.full_like(v_shell, np.nan, dtype=float)
+    mdyn_err_msun = np.full_like(v_shell, np.nan, dtype=float)
+
+    good = np.isfinite(r_m) & (r_m > 0) & np.isfinite(v_ms) & (v_ms > 0)
+    if np.any(good):
+        mdyn_msun[good] = (v_ms[good] ** 2 * r_m[good] / const.G.value) / const.M_sun.value
+        good_err = good & np.isfinite(v_err) & (v_err > 0)
+        if np.any(good_err):
+            mdyn_err_msun[good_err] = np.abs(mdyn_msun[good_err]) * 2.0 * np.abs(v_err[good_err]) / np.abs(v_shell[good_err])
+
+    fig, ax = plt.subplots(figsize=(6.5, 4.8), dpi=300)
+    ax.xaxis.set_minor_locator(AutoMinorLocator(2))
+    ax.yaxis.set_minor_locator(AutoMinorLocator(2))
+    ax.tick_params(axis='both', labelsize=12)
+
+    x = r_out_arcsec[:n_sel]
+    y = mdyn_msun[:n_sel]
+    yerr = np.where(np.isfinite(mdyn_err_msun[:n_sel]), mdyn_err_msun[:n_sel], 0.0)
+    ok = np.isfinite(x) & np.isfinite(y) & (y > 0)
+    x = x[ok]
+    y = y[ok]
+    yerr = yerr[ok]
+
+    logy = np.log10(y)
+    logyerr = np.where(
+        (yerr > 0) & np.isfinite(yerr),
+        yerr / (y * np.log(10.0)),
+        0.0
+    )
+
+    ax.errorbar(
+        x, logy, yerr=logyerr,
+        color='black', fmt="o-", mfc="none", mec="blue", ecolor='black',
+        capsize=4, mew=1., lw=1.
+    )
+
+    ax.set_xlabel(r"Radius [arcsec]", fontsize=11)
+    ax.set_ylabel(r"log$_{10}$($M_{dyn}$ [$M_\odot$])", fontsize=11)
+    ax.set_title(title, fontsize=11)
+    ax.grid(alpha=0.2)
+
+    xmax_arc = float(r_out_arcsec[n_sel - 1]) if np.isfinite(r_out_arcsec[n_sel - 1]) else 0.0
+    ax.set_xlim(0.0, xmax_arc * 1.10 if xmax_arc > 0 else 1.0)
+
+    if logy.size:
+        ymax = np.nanmax(logy + np.where(np.isfinite(logyerr), logyerr, 0.0))
+        if np.isfinite(ymax):
+            ymin = np.nanmin(logy - np.where(np.isfinite(logyerr), logyerr, 0.0))
+            if np.isfinite(ymin):
+                pad = 0.05 * max(ymax - ymin, 1.0)
+                ax.set_ylim(ymin - pad, ymax + pad)
+
+    if np.isfinite(r_outer_arcsec):
+        ax.axvline(r_outer_arcsec, color="black", ls="--", lw=0.8, alpha=0.6)
+
+    def a2k(x):
+        return x * float(scale_kpc_per_arcsec)
+
+    def k2a(x):
+        return x / float(scale_kpc_per_arcsec)
+
+    secax = ax.secondary_xaxis("top", functions=(a2k, k2a))
+    secax.set_xlabel("Radius [kpc]", fontsize=11)
+    secax.tick_params(axis='both', labelsize=10)
+
+    plt.tight_layout()
+    if x.size:
+        logger.info("Enclosed dynamical mass profile computed and plotted.")
+
+
+
+def _plot_enclosed_dynamical_density(best_dict, n_shells, num_shells_selected, title, scale_kpc_per_arcsec, rin_pix, rout_pix, arcsec_per_pix):
+    if best_dict is None:
+        return
+
+    v_shell = np.asarray(best_dict.get("v", []), float)
+    if v_shell.size == 0:
+        return
+
+    v_err = np.asarray(best_dict.get("v_err", np.full_like(v_shell, np.nan)), float)
+
+    n_shells = int(n_shells)
+    edges_pix = np.linspace(float(rin_pix), float(rout_pix), int(n_shells) + 1)
+    edges_arcsec = edges_pix * float(arcsec_per_pix)
+    r_out_arcsec = edges_arcsec[1:]
+
+    n = int(min(len(r_out_arcsec), len(v_shell), len(v_err)))
+    if n < 1:
+        return
+
+    r_out_arcsec = r_out_arcsec[:n]
+    v_shell = v_shell[:n]
+    v_err = v_err[:n]
+
+    n_sel = int(num_shells_selected)
+    if n_sel < 1:
+        logger.warning("num_shells_selected must be >= 1 for enclosed density plot; skipping.")
+        return
+    if n_sel > n:
+        logger.warning(
+            "num_shells_selected=%d exceeds available shells=%d; using last shell.",
+            int(num_shells_selected), int(n),
+        )
+        n_sel = n
+
+    r_outer_arcsec = edges_arcsec[n_sel]
+
+    r_kpc = r_out_arcsec * float(scale_kpc_per_arcsec)
+    r_pc = r_kpc * 1000.0
+    r_m = (r_kpc * u.kpc).to(u.m).value
+    v_ms = v_shell * 1e3
+
+    mdyn_msun = np.full_like(v_shell, np.nan, dtype=float)
+    mdyn_err_msun = np.full_like(v_shell, np.nan, dtype=float)
+
+    good = np.isfinite(r_m) & (r_m > 0) & np.isfinite(v_ms) & (v_ms > 0)
+    if np.any(good):
+        mdyn_msun[good] = (v_ms[good] ** 2 * r_m[good] / const.G.value) / const.M_sun.value
+        good_err = good & np.isfinite(v_err) & (v_err > 0)
+        if np.any(good_err):
+            mdyn_err_msun[good_err] = np.abs(mdyn_msun[good_err]) * 2.0 * np.abs(v_err[good_err]) / np.abs(v_shell[good_err])
+
+    rho_msun_pc3 = np.full_like(mdyn_msun, np.nan, dtype=float)
+    rho_err_msun_pc3 = np.full_like(mdyn_msun, np.nan, dtype=float)
+
+    good_r = np.isfinite(r_pc) & (r_pc > 0)
+    good_rho = good_r & np.isfinite(mdyn_msun) & (mdyn_msun > 0)
+    if np.any(good_rho):
+        rho_msun_pc3[good_rho] = 3.0 * mdyn_msun[good_rho] / (4.0 * np.pi * r_pc[good_rho]**3)
+        good_rho_err = good_rho & np.isfinite(mdyn_err_msun) & (mdyn_err_msun > 0)
+        if np.any(good_rho_err):
+            rho_err_msun_pc3[good_rho_err] = rho_msun_pc3[good_rho_err] * (mdyn_err_msun[good_rho_err] / mdyn_msun[good_rho_err])
+
+    fig, ax = plt.subplots(figsize=(6.5, 4.8), dpi=300)
+    ax.xaxis.set_minor_locator(AutoMinorLocator(2))
+    ax.yaxis.set_minor_locator(AutoMinorLocator(2))
+    ax.tick_params(axis='both', labelsize=12)
+
+    x = r_out_arcsec[:n_sel]
+    y = rho_msun_pc3[:n_sel]
+    yerr = np.where(np.isfinite(rho_err_msun_pc3[:n_sel]), rho_err_msun_pc3[:n_sel], 0.0)
+    ok = np.isfinite(x) & np.isfinite(y) & (y > 0)
+    x = x[ok]
+    y = y[ok]
+    yerr = yerr[ok]
+
+    logy = np.log10(y)
+    logyerr = np.where(
+        (yerr > 0) & np.isfinite(yerr),
+        yerr / (y * np.log(10.0)),
+        0.0
+    )
+
+    ax.errorbar(
+        x, logy, yerr=logyerr,
+        color='black', fmt="o-", mfc="none", mec="blue", ecolor='black',
+        capsize=4, mew=1., lw=1.
+    )
+
+    ax.set_xlabel(r"Radius [arcsec]", fontsize=11)
+    ax.set_ylabel(r"log$_{10}$($\bar{\rho}_{dyn}$ [$M_\odot\,\mathrm{pc}^{-3}$])", fontsize=11)
+    ax.set_title(title, fontsize=11)
+    ax.grid(alpha=0.2)
+
+    xmax_arc = float(r_out_arcsec[n_sel - 1]) if np.isfinite(r_out_arcsec[n_sel - 1]) else 0.0
+    ax.set_xlim(0.0, xmax_arc * 1.10 if xmax_arc > 0 else 1.0)
+
+    if logy.size:
+        ymax = np.nanmax(logy + np.where(np.isfinite(logyerr), logyerr, 0.0))
+        if np.isfinite(ymax):
+            ymin = np.nanmin(logy - np.where(np.isfinite(logyerr), logyerr, 0.0))
+            if np.isfinite(ymin):
+                pad = 0.05 * max(ymax - ymin, 1.0)
+                ax.set_ylim(ymin - pad, ymax + pad)
+
+    if np.isfinite(r_outer_arcsec):
+        ax.axvline(r_outer_arcsec, color="black", ls="--", lw=0.8, alpha=0.6)
+
+    def a2k(x):
+        return x * float(scale_kpc_per_arcsec)
+
+    def k2a(x):
+        return x / float(scale_kpc_per_arcsec)
+
+    secax = ax.secondary_xaxis("top", functions=(a2k, k2a))
+    secax.set_xlabel("Radius [kpc]", fontsize=11)
+    secax.tick_params(axis='both', labelsize=10)
+
+    plt.tight_layout()
 
 
 
@@ -6463,6 +6825,30 @@ def load_ne_map(ne_map_path):
     return data2d
 
 
+def load_mass_to_light_map(ml_map_path, ext=0, is_log=False):
+    """
+    Read a 2D gas mass-to-line-luminosity map.
+    Supported units are handled by mass_map_from_mass_to_light.
+    """
+    if ml_map_path is None:
+        return None
+
+    with fits.open(ml_map_path) as hdul:
+        ext = int(ext)
+        if ext >= len(hdul):
+            raise ValueError(f"Mass-to-light map extension {ext} not found in FITS file: {ml_map_path}")
+        data = getattr(hdul[ext], "data", None)
+        if data is None or np.ndim(data) != 2:
+            raise ValueError(f"No 2D mass-to-light map found in extension {ext}: {ml_map_path}")
+        data2d = np.array(data, dtype=float, copy=True)
+
+    data2d[~np.isfinite(data2d)] = np.nan
+    if bool(is_log):
+        data2d = 10.0 ** data2d
+    data2d[data2d <= 0] = np.nan
+    return data2d
+
+
 def radial_shell_edges_pix(rmin_pix, rmax_pix, n_shells):
     return np.linspace(float(rmin_pix), float(rmax_pix), int(n_shells) + 1)
 
@@ -6549,6 +6935,19 @@ def luminosity_from_flux(flux_erg_s_cm2, luminosity_distance_mpc):
     return 4.0 * np.pi * dl_cm**2 * np.asarray(flux_erg_s_cm2, dtype=float)
 
 
+def line_luminosity_map_from_cube(
+    cube_data,
+    dv_kms,
+    lambda_obs_angstrom,
+    luminosity_distance_mpc,
+    flux_unit_scale=1.0,
+):
+    cube_data = np.asarray(cube_data, dtype=float)
+    dlam = float(lambda_obs_angstrom) * abs(float(dv_kms)) / 299792.458
+    flux_map = np.nansum(cube_data, axis=0) * float(flux_unit_scale) * dlam
+    return luminosity_from_flux(flux_map, luminosity_distance_mpc)
+
+
 def ionized_mass_from_luminosity(line_id, luminosity_erg_s, ne_cm3, z_over_zsun=1.0):
     """
     Standard ionized-gas mass scalings.
@@ -6588,6 +6987,37 @@ def ionized_mass_from_luminosity(line_id, luminosity_erg_s, ne_cm3, z_over_zsun=
         raise ValueError(f"Unsupported line_id={line_id}")
 
     return out
+
+
+def mass_map_from_density_map(line_id, luminosity_map_erg_s, ne_map_cm3, z_over_zsun=1.0):
+    return ionized_mass_from_luminosity(
+        line_id=line_id,
+        luminosity_erg_s=np.asarray(luminosity_map_erg_s, dtype=float),
+        ne_cm3=np.asarray(ne_map_cm3, dtype=float),
+        z_over_zsun=z_over_zsun,
+    )
+
+
+def mass_map_from_mass_to_light(luminosity_map_erg_s, ml_map, units="Msun_per_1e40_erg_s"):
+    if str(units) != "Msun_per_1e40_erg_s":
+        raise ValueError("mass_to_light_units currently supports only 'Msun_per_1e40_erg_s'.")
+    lum = np.asarray(luminosity_map_erg_s, dtype=float)
+    ml = np.asarray(ml_map, dtype=float)
+    out = np.full(np.broadcast(lum, ml).shape, np.nan, dtype=float)
+    good = np.isfinite(lum) & (lum > 0) & np.isfinite(ml) & (ml > 0)
+    out[good] = ml[good] * (lum[good] / 1.0e40)
+    return out
+
+
+def shell_mass_profile_from_mass_map(mass_map, shell_masks):
+    mass_map = np.asarray(mass_map, dtype=float)
+    mass_shell = np.full(len(shell_masks), np.nan, dtype=float)
+    for i, mask2d in enumerate(shell_masks):
+        vals = mass_map[mask2d]
+        vals = vals[np.isfinite(vals)]
+        if vals.size > 0:
+            mass_shell[i] = np.nansum(vals)
+    return mass_shell
 
 
 def mass_outflow_rate_msun_per_yr(mass_msun, velocity_kms, delta_r_kpc):
@@ -6650,11 +7080,16 @@ def build_outflow_energetics_profile(
     lambda_obs_angstrom,
     luminosity_distance_mpc,
     velocity_profile,
-    ne_shell,
-    line_id,
+    ne_shell=None,
+    line_id=None,
     z_over_zsun=1.0,
     extra_mask=None,
     flux_unit_scale=1.0,
+    mass_shell=None,
+    mass_err_shell=None,
+    ne_err_shell=None,
+    flux_uncertainty_fraction=0.05,
+    density_uncertainty_fraction=0.10,
 ):
     """
     Build a shell-by-shell energetics profile for one lobe.
@@ -6689,7 +7124,21 @@ def build_outflow_energetics_profile(
     vel = np.asarray(velocity_profile["v"], dtype=float)
     vel_err = np.asarray(velocity_profile.get("v_err", np.full_like(vel, np.nan)), dtype=float)
 
-    n = min(len(rmid_arc), len(dr_arc), len(flux_shell), len(lum_shell), len(ne_shell), len(vel), len(vel_err), len(npix_shell))
+    lengths = [len(rmid_arc), len(dr_arc), len(flux_shell), len(lum_shell), len(vel), len(vel_err), len(npix_shell)]
+    if mass_shell is not None:
+        mass_shell = np.asarray(mass_shell, dtype=float)
+        lengths.append(len(mass_shell))
+        if mass_err_shell is not None:
+            mass_err_shell = np.asarray(mass_err_shell, dtype=float)
+            lengths.append(len(mass_err_shell))
+    else:
+        ne_shell = np.asarray(ne_shell, dtype=float)
+        lengths.append(len(ne_shell))
+        if ne_err_shell is not None:
+            ne_err_shell = np.asarray(ne_err_shell, dtype=float)
+            lengths.append(len(ne_err_shell))
+
+    n = min(lengths)
 
     rmid_arc = rmid_arc[:n]
     dr_arc = dr_arc[:n]
@@ -6697,17 +7146,35 @@ def build_outflow_energetics_profile(
     dr_kpc = dr_kpc[:n]
     flux_shell = flux_shell[:n]
     lum_shell = lum_shell[:n]
-    ne_shell = np.asarray(ne_shell[:n], dtype=float)
     vel = vel[:n]
     vel_err = vel_err[:n]
     npix_shell = npix_shell[:n]
 
-    mass = ionized_mass_from_luminosity(
-        line_id=line_id,
-        luminosity_erg_s=lum_shell,
-        ne_cm3=ne_shell,
-        z_over_zsun=z_over_zsun,
-    )
+    if mass_shell is not None:
+        mass = mass_shell[:n]
+        ne_shell = np.full(n, np.nan, dtype=float) if ne_shell is None else np.asarray(ne_shell[:n], dtype=float)
+        if mass_err_shell is not None:
+            mass_err = np.asarray(mass_err_shell[:n], dtype=float)
+        else:
+            mass_err = np.full(n, np.nan, dtype=float)
+    else:
+        ne_shell = np.asarray(ne_shell[:n], dtype=float)
+        mass = ionized_mass_from_luminosity(
+            line_id=line_id,
+            luminosity_erg_s=lum_shell,
+            ne_cm3=ne_shell,
+            z_over_zsun=z_over_zsun,
+        )
+        if ne_err_shell is None:
+            ne_err = np.abs(ne_shell) * float(density_uncertainty_fraction)
+        else:
+            ne_err = np.asarray(ne_err_shell[:n], dtype=float)
+        frac_l = np.full(n, float(flux_uncertainty_fraction), dtype=float)
+        frac_ne = np.full(n, np.nan, dtype=float)
+        good_ne = np.isfinite(ne_shell) & (ne_shell > 0) & np.isfinite(ne_err) & (ne_err >= 0)
+        frac_ne[good_ne] = ne_err[good_ne] / ne_shell[good_ne]
+        frac_m = np.sqrt(frac_l**2 + frac_ne**2)
+        mass_err = np.abs(mass) * frac_m
 
     mdot = mass_outflow_rate_msun_per_yr(
         mass_msun=mass,
@@ -6717,6 +7184,19 @@ def build_outflow_energetics_profile(
 
     pdot = momentum_rate_dyne(mdot, vel)
     edot = kinetic_power_erg_s(mdot, vel)
+
+    frac_m = np.full(n, np.nan, dtype=float)
+    good_m = np.isfinite(mass) & (mass != 0) & np.isfinite(mass_err) & (mass_err >= 0)
+    frac_m[good_m] = mass_err[good_m] / np.abs(mass[good_m])
+    frac_v = np.full(n, np.nan, dtype=float)
+    good_v = np.isfinite(vel) & (vel != 0) & np.isfinite(vel_err) & (vel_err >= 0)
+    frac_v[good_v] = vel_err[good_v] / np.abs(vel[good_v])
+    mdot_err = np.abs(mdot) * np.sqrt(frac_m**2 + frac_v**2)
+    frac_mdot = np.full(n, np.nan, dtype=float)
+    good_mdot = np.isfinite(mdot) & (mdot != 0) & np.isfinite(mdot_err) & (mdot_err >= 0)
+    frac_mdot[good_mdot] = mdot_err[good_mdot] / np.abs(mdot[good_mdot])
+    pdot_err = np.abs(pdot) * np.sqrt(frac_mdot**2 + frac_v**2)
+    edot_err = np.abs(edot) * np.sqrt(frac_mdot**2 + (2.0 * frac_v)**2)
 
     return {
         "r_arcsec": rmid_arc,
@@ -6729,9 +7209,13 @@ def build_outflow_energetics_profile(
         "lum_erg_s": lum_shell,
         "ne_cm3": ne_shell,
         "mass_msun": mass,
+        "mass_err_msun": mass_err,
         "mdot_msun_yr": mdot,
+        "mdot_err_msun_yr": mdot_err,
         "pdot_dyne": pdot,
+        "pdot_err_dyne": pdot_err,
         "edot_erg_s": edot,
+        "edot_err_erg_s": edot_err,
         "npix_shell": npix_shell,
     }
 
@@ -6743,37 +7227,35 @@ def energetics_profile_to_table(profile_dict):
 def save_energetics_table_fits(profile_dict, filename):
     cols = []
 
-    def _add_col(name, key):
+    def _add_col(name, key, unit=None, fmt="D"):
         if key in profile_dict:
-            arr = np.asarray(profile_dict[key], dtype=np.float32)
+            arr = np.asarray(profile_dict[key], dtype=np.int32 if fmt == "J" else np.float64)
             if arr.ndim == 1:
-                cols.append(fits.Column(name=name, format="E", array=arr))
+                cols.append(fits.Column(name=name, format=fmt, unit=unit, array=arr))
 
-    _add_col("R_ARCSEC", "r_arcsec")
-    _add_col("DR_ARCSEC", "dr_arcsec")
-    _add_col("R_KPC", "r_kpc")
-    _add_col("DR_KPC", "dr_kpc")
+    _add_col("R_ARCSEC", "r_arcsec", "arcsec")
+    _add_col("DR_ARCSEC", "dr_arcsec", "arcsec")
+    _add_col("R_KPC", "r_kpc", "kpc")
+    _add_col("DR_KPC", "dr_kpc", "kpc")
+    _add_col("FLUX", "flux_erg_s_cm2", "erg s-1 cm-2")
+    _add_col("LUMINOSITY", "lum_erg_s", "erg s-1")
+    _add_col("NE_CM3", "ne_cm3", "cm-3")
+    _add_col("M_MSUN", "mass_msun", "Msun")
+    _add_col("MDOT", "mdot_msun_yr", "Msun yr-1")
+    _add_col("PDOT", "pdot_dyne", "dyn")
+    _add_col("EDOT", "edot_erg_s", "erg s-1")
+    _add_col("NPIX", "npix_shell", "pix", fmt="J")
 
-    _add_col("V_KMS", "v_kms")
-    _add_col("VERR_KMS", "v_err_kms")
 
-    _add_col("FLUX", "flux_erg_s_cm2")
-    _add_col("LUMINOSITY", "lum_erg_s")
-    _add_col("NE_CM3", "ne_cm3")
-    _add_col("M_MSUN", "mass_msun")
-    _add_col("MDOT", "mdot_msun_yr")
-    _add_col("PDOT", "pdot_dyne")
-    _add_col("EDOT", "edot_erg_s")
-    _add_col("NPIX", "npix_shell")
+    _add_col("MDOT_LO", "mdot_lo_msun_yr", "Msun yr-1")
+    _add_col("MDOT_HI", "mdot_hi_msun_yr", "Msun yr-1")
+    _add_col("MDOT_MID", "mdot_mid_msun_yr", "Msun yr-1")
 
-    _add_col("MERR_MSUN", "mass_err_msun")
-    _add_col("MDOT_ERR", "mdot_err_msun_yr")
-    _add_col("PDOT_ERR", "pdot_err_dyne")
-    _add_col("EDOT_ERR", "edot_err_erg_s")
+    _add_col("M_MSUN_ERR", "mass_err_msun", "Msun")
+    _add_col("MDOT_ERR", "mdot_err_msun_yr", "Msun yr-1")
+    _add_col("PDOT_ERR", "pdot_err_dyne", "dyn")
+    _add_col("EDOT_ERR", "edot_err_erg_s", "erg s-1")
 
-    _add_col("MDOT_LO", "mdot_lo_msun_yr")
-    _add_col("MDOT_HI", "mdot_hi_msun_yr")
-    _add_col("MDOT_MID", "mdot_mid_msun_yr")
 
     hdu_primary = fits.PrimaryHDU()
     hdu_table = fits.BinTableHDU.from_columns(cols, name="ENERGETICS")
@@ -6781,11 +7263,31 @@ def save_energetics_table_fits(profile_dict, filename):
     if "density_mode" in profile_dict:
         hdu_table.header["DENSMODE"] = str(profile_dict["density_mode"])
 
+    if "mass_estimator" in profile_dict:
+        hdu_table.header["MESTIM"] = str(profile_dict["mass_estimator"])
+
+    if "mass_to_light_units" in profile_dict:
+        hdu_table.header["MLUNITS"] = str(profile_dict["mass_to_light_units"])
+
+    if "mass_to_light_is_log" in profile_dict:
+        hdu_table.header["MLISLOG"] = bool(profile_dict["mass_to_light_is_log"])
+
     if "assumed_ne_values_cm3" in profile_dict:
         vals = np.asarray(profile_dict["assumed_ne_values_cm3"], dtype=float)
         hdu_table.header["NEGRID"] = ",".join(f"{v:g}" for v in vals)
 
     fits.HDUList([hdu_primary, hdu_table]).writeto(filename, overwrite=True)
+
+
+def save_gas_mass_map_fits(mass_map, obs, filename, estimator, ml_units=None, ml_norm_erg_s=None):
+    hdr = _make_map_header_from_obs(obs, bunit="Msun")
+    hdr["MESTIM"] = str(estimator)
+    if ml_units is not None:
+        hdr["MLUNITS"] = str(ml_units)
+    if ml_norm_erg_s is not None:
+        hdr["MLNORM"] = float(ml_norm_erg_s)
+
+    fits.PrimaryHDU(data=np.asarray(mass_map, dtype=np.float32), header=hdr).writeto(filename, overwrite=True)
 
 
 
@@ -7262,7 +7764,3 @@ def _save_moment_maps_fits(obs, model, output_path: Path):
     ])
 
     hdul.writeto(output_path, overwrite=True)
-
-
-
-
