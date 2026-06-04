@@ -415,60 +415,79 @@ def _plot_disc_pv_diagram(
     ny, nx = data_cube.shape[1:]
     max_pix = max(1, int(round(float(radius_arcsec) / float(arcsec_per_pix))))
     offsets_pix = np.arange(-max_pix, max_pix + 1, dtype=float)
-    pa_rad = np.deg2rad(float(pa_deg))
     x0, y0 = center_xy
     slit_offsets_pix = np.arange(-1, 2, dtype=float)
 
-    data_cols = []
-    model_cols = []
-    offsets_keep = []
-    for off_pix in offsets_pix:
-        xx = np.rint(float(x0) + off_pix * np.sin(pa_rad) + slit_offsets_pix * np.cos(pa_rad)).astype(int)
-        yy = np.rint(float(y0) + off_pix * np.cos(pa_rad) - slit_offsets_pix * np.sin(pa_rad)).astype(int)
-        keep = (xx >= 0) & (xx < nx) & (yy >= 0) & (yy < ny)
-        if not np.any(keep):
-            continue
-        data_cols.append(np.nanmean(data_cube[:, yy[keep], xx[keep]], axis=1))
-        model_cols.append(np.nanmean(model_cube[:, yy[keep], xx[keep]], axis=1))
-        offsets_keep.append(off_pix)
+    def _extract_pv(pa_deg_axis):
+        pa_rad = np.deg2rad(float(pa_deg_axis))
+        data_cols = []
+        model_cols = []
+        offsets_keep = []
+        for off_pix in offsets_pix:
+            xx = np.rint(float(x0) + off_pix * np.sin(pa_rad) + slit_offsets_pix * np.cos(pa_rad)).astype(int)
+            yy = np.rint(float(y0) + off_pix * np.cos(pa_rad) - slit_offsets_pix * np.sin(pa_rad)).astype(int)
+            keep = (xx >= 0) & (xx < nx) & (yy >= 0) & (yy < ny)
+            if not np.any(keep):
+                continue
+            data_cols.append(np.nanmean(data_cube[:, yy[keep], xx[keep]], axis=1))
+            model_cols.append(np.nanmean(model_cube[:, yy[keep], xx[keep]], axis=1))
+            offsets_keep.append(off_pix)
+        if not data_cols:
+            raise ValueError("No valid pixels along disc PA for PV plotting.")
+        return (
+            np.asarray(offsets_keep, dtype=float) * float(arcsec_per_pix),
+            np.asarray(data_cols, dtype=float).T,
+            np.asarray(model_cols, dtype=float).T,
+        )
 
-    if not data_cols:
-        raise ValueError("No valid pixels along disc PA for PV plotting.")
-
-    offsets_arcsec = np.asarray(offsets_keep, dtype=float) * float(arcsec_per_pix)
-    data_pv = np.asarray(data_cols, dtype=float).T
-    model_pv = np.asarray(model_cols, dtype=float).T
+    pv_panels = [
+        ("Major axis", float(pa_deg), *_extract_pv(float(pa_deg))),
+        ("Minor axis", float(pa_deg) + 90.0, *_extract_pv(float(pa_deg) + 90.0)),
+    ]
 
     fig, axes = plt.subplots(1, 2, figsize=(9.2, 4.2), dpi=300, constrained_layout=True, sharex=True, sharey=True)
-    extent = [float(offsets_arcsec[0]), float(offsets_arcsec[-1]), float(velocity_axis[0]), float(velocity_axis[-1])]
-    finite_data = data_pv[np.isfinite(data_pv)]
-    finite_model = model_pv[np.isfinite(model_pv)]
-    vmax = np.nanpercentile(finite_data, 99.0) if finite_data.size else np.nan
-    levels = np.unique(np.nanpercentile(finite_model, [70, 85, 95])) if finite_model.size else []
-    levels = levels[np.isfinite(levels) & (levels > 0)]
 
-    for ax, pv, title in zip(axes, (data_pv, model_pv), ("DATA", "DISC MODEL")):
+    for i, (ax, (axis_label, axis_pa, offsets_arcsec, data_pv, model_pv)) in enumerate(zip(axes, pv_panels)):
+        extent = [float(offsets_arcsec[0]), float(offsets_arcsec[-1]), float(velocity_axis[0]), float(velocity_axis[-1])]
+        finite_data = data_pv[np.isfinite(data_pv)]
+        finite_model = model_pv[np.isfinite(model_pv)]
+        vmax = np.nanpercentile(finite_data, 99.0) if finite_data.size else np.nan
+        levels = np.unique(np.nanpercentile(finite_model, [70, 85, 95])) if finite_model.size else []
+        levels = levels[np.isfinite(levels) & (levels > 0)]
         ax.imshow(
-            pv,
+            data_pv,
             origin="lower",
             aspect="auto",
             extent=extent,
-            cmap="Blues",
+            cmap="magma",
             vmin=0.0,
             vmax=vmax if np.isfinite(vmax) and vmax > 0 else None,
         )
         if len(levels) > 0:
-            ax.contour(offsets_arcsec, velocity_axis, model_pv, levels=levels, colors="m", linestyles="--", linewidths=0.8)
+            ax.contour(offsets_arcsec, velocity_axis, model_pv, levels=levels, colors="cyan", linestyles="-", linewidths=1.1)
         ax.axhline(0.0, color="black", ls=":", lw=0.8)
         ax.axvline(0.0, color="black", ls=":", lw=0.8)
-        ax.set_title(title, fontsize=12)
+        ax.text(
+            0.04 if i == 0 else 0.96,
+            0.94,
+            f"PA = {int(round(float(axis_pa)))}°",
+            transform=ax.transAxes,
+            ha="left" if i == 0 else "right",
+            va="top",
+            color="white",
+            fontsize=11,
+            bbox=dict(facecolor="black", alpha=0.45, edgecolor="none", pad=3),
+        )
         ax.set_xlabel("Offset [arcsec]", fontsize=11)
         ax.xaxis.set_minor_locator(AutoMinorLocator(2))
         ax.yaxis.set_minor_locator(AutoMinorLocator(2))
         ax.tick_params(axis="both", which="both", direction="in", top=True, right=True, labelsize=10)
 
     axes[0].set_ylabel(r"Velocity [km s$^{-1}$]", fontsize=11)
-    fig.suptitle(f"Disc PV diagram (PA={float(pa_deg):.1f} deg)", fontsize=13)
+    axes[1].yaxis.set_label_position("right")
+    axes[1].yaxis.tick_right()
+    axes[1].set_ylabel(r"Velocity [km s$^{-1}$]", fontsize=11)
+    fig.suptitle("Disc PV diagram", fontsize=13)
     finalize_figure(output_path, show=show_plots)
 
 
