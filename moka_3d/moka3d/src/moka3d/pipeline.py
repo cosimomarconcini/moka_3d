@@ -445,6 +445,24 @@ def _plot_disc_pv_diagram(
         ("Minor axis", float(pa_deg) + 90.0, *_extract_pv(float(pa_deg) + 90.0)),
     ]
 
+    all_profiles = []
+    for _, _, _, data_pv, model_pv in pv_panels:
+        for pv in (data_pv, model_pv):
+            all_profiles.append(np.nanmax(np.abs(pv), axis=1))
+    combined_prof = np.nanmax(np.vstack(all_profiles), axis=0)
+    finite_prof = combined_prof[np.isfinite(combined_prof)]
+    y_limits = None
+    if finite_prof.size > 0:
+        thr = max(0.0, 0.05 * float(np.nanmax(finite_prof)))
+        good_v = np.isfinite(combined_prof) & (combined_prof > thr)
+        if np.any(good_v):
+            vsel = velocity_axis[good_v]
+            vmin = float(np.nanmin(vsel))
+            vmax = float(np.nanmax(vsel))
+            dv = abs(float(np.nanmedian(np.diff(velocity_axis)))) if velocity_axis.size > 1 else 0.0
+            pad = max(dv, 0.10 * abs(vmax - vmin))
+            y_limits = (vmax + pad, vmin - pad) if velocity_axis[0] > velocity_axis[-1] else (vmin - pad, vmax + pad)
+
     fig, axes = plt.subplots(1, 2, figsize=(9.2, 4.2), dpi=300, constrained_layout=True, sharex=True, sharey=True)
 
     for i, (ax, (axis_label, axis_pa, offsets_arcsec, data_pv, model_pv)) in enumerate(zip(axes, pv_panels)):
@@ -464,12 +482,13 @@ def _plot_disc_pv_diagram(
             vmax=vmax if np.isfinite(vmax) and vmax > 0 else None,
         )
         if len(levels) > 0:
+            # Colored background = data; contours = best-fit disc model
             ax.contour(offsets_arcsec, velocity_axis, model_pv, levels=levels, colors="cyan", linestyles="-", linewidths=1.1)
         ax.axhline(0.0, color="black", ls=":", lw=0.8)
         ax.axvline(0.0, color="black", ls=":", lw=0.8)
         ax.text(
             0.04 if i == 0 else 0.96,
-            0.94,
+            0.96,
             f"PA = {int(round(float(axis_pa)))}°",
             transform=ax.transAxes,
             ha="left" if i == 0 else "right",
@@ -478,14 +497,18 @@ def _plot_disc_pv_diagram(
             fontsize=11,
             bbox=dict(facecolor="black", alpha=0.45, edgecolor="none", pad=3),
         )
+        
         ax.set_xlabel("Offset [arcsec]", fontsize=11)
         ax.xaxis.set_minor_locator(AutoMinorLocator(2))
         ax.yaxis.set_minor_locator(AutoMinorLocator(2))
         ax.tick_params(axis="both", which="both", direction="in", top=True, right=True, labelsize=10)
+        if y_limits is not None:
+            ax.set_ylim(*y_limits)
 
     axes[0].set_ylabel(r"Velocity [km s$^{-1}$]", fontsize=11)
     axes[1].yaxis.set_label_position("right")
     axes[1].yaxis.tick_right()
+    axes[1].tick_params(axis="y", which="both", labelright=True, labelleft=False, right=True, left=False)
     axes[1].set_ylabel(r"Velocity [km s$^{-1}$]", fontsize=11)
     fig.suptitle("Disc PV diagram", fontsize=13)
     finalize_figure(output_path, show=show_plots)
