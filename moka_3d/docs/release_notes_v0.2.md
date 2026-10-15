@@ -10,4 +10,5 @@ Main features remained unchanged. Improvements of the outflow energetic estimate
 - Jun 03, 2026 -- Added radius info to FITS table output of per-shell kinematic properties after grid-search fitting 
 - Jun 03, 2026 -- Added PV diagram output .png for pure disc fit mode
 - Jun 03, 2026 -- Added radial profile output plot for outflow energetic properties
-- Jun 03, 2026 -- Added possibility to give in input either a 2D electron density map or M/L conversion factor map to derive outflow energetic properties 
+- Jun 03, 2026 -- Added possibility to give in input either a 2D electron density map or M/L conversion factor map to derive outflow energetic properties
+- Oct. 15 2026 -- Added the possibility to let the P.A. free to vary across shells for warped or irregular discs. An output .png, .fits file is provided.
