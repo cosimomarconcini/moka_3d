@@ -40,6 +40,10 @@ class InputConfig:
     save_all_outputs: bool = False
     ne_map: Optional[str] = None
     ne_outflow: Optional[List[float]] = None
+    mass_to_light_map: Optional[str] = None
+    mass_to_light_map_ext: int = 0
+    mass_to_light_units: str = "Msun_per_1e40_erg_s"
+    mass_to_light_is_log: bool = False
 
 
 @dataclass
@@ -169,6 +173,10 @@ class AdvancedConfig:
     save_energetics_table: bool = True
     assumed_ne_values: List[float] = field(default_factory=lambda: [100.0, 500.0, 1000.0])
     oiii_metallicity_z_over_zsun: float = 1.0
+    energetics_flux_uncertainty_fraction: float = 0.05
+    energetics_density_map_uncertainty_fraction: float = 0.10
+    energetics_mass_to_light_uncertainty_fraction: float = 0.10
+    ne_outflow_uncertainty: Optional[List[float]] = None
 
 
 
@@ -335,6 +343,9 @@ def validate_config(cfg: AppConfig) -> None:
     # --------------------------------
     if cfg.fit.component_mode not in {"disk", "outflow", "disk_then_outflow"}:
         raise ValueError("fit.component_mode must be 'disk', 'outflow', or 'disk_then_outflow'.")
+    uses_disc = cfg.fit.component_mode in {"disk", "disk_then_outflow"}
+    uses_outflow = cfg.fit.component_mode in {"outflow", "disk_then_outflow"}
+    uses_outflow_energetics = uses_outflow and bool(cfg.advanced.compute_energetics)
 
     # --------------------------------
     # General processing checks
@@ -352,12 +363,24 @@ def validate_config(cfg: AppConfig) -> None:
             raise FileNotFoundError(f"SN map not found: {sn_path}")
 
 
-    if cfg.input.ne_map is not None:
+    if uses_outflow_energetics and cfg.input.ne_map is not None:
         ne_path = cfg.paths.ancillary_dir / cfg.input.ne_map
         if not ne_path.exists():
             raise FileNotFoundError(f"Density map not found: {ne_path}")
 
-    if cfg.input.ne_outflow is not None:
+    if uses_outflow_energetics and cfg.input.mass_to_light_map is not None:
+        ml_path = cfg.paths.ancillary_dir / cfg.input.mass_to_light_map
+        if not ml_path.exists():
+            raise FileNotFoundError(f"Mass-to-light map not found: {ml_path}")
+        if int(cfg.input.mass_to_light_map_ext) < 0:
+            raise ValueError("input.mass_to_light_map_ext must be >= 0.")
+        if str(cfg.input.mass_to_light_units) != "Msun_per_1e40_erg_s":
+            raise ValueError("input.mass_to_light_units currently supports only 'Msun_per_1e40_erg_s'.")
+
+    if uses_outflow_energetics and cfg.input.ne_map is not None and cfg.input.mass_to_light_map is not None:
+        raise ValueError("input.ne_map and input.mass_to_light_map are mutually exclusive mass estimators.")
+
+    if uses_outflow_energetics and cfg.input.ne_outflow is not None:
         if not isinstance(cfg.input.ne_outflow, list):
             raise ValueError("input.ne_outflow must be null or a list of density values.")
         if len(cfg.input.ne_outflow) < 1:
@@ -365,14 +388,33 @@ def validate_config(cfg: AppConfig) -> None:
         if any(float(x) <= 0 for x in cfg.input.ne_outflow):
             raise ValueError("All values in input.ne_outflow must be > 0.")
 
-    if not isinstance(cfg.advanced.assumed_ne_values, list) or len(cfg.advanced.assumed_ne_values) < 1:
+    if uses_outflow_energetics and (not isinstance(cfg.advanced.assumed_ne_values, list) or len(cfg.advanced.assumed_ne_values) < 1):
         raise ValueError("advanced.assumed_ne_values must be a non-empty list.")
 
-    if any(float(x) <= 0 for x in cfg.advanced.assumed_ne_values):
+    if uses_outflow_energetics and any(float(x) <= 0 for x in cfg.advanced.assumed_ne_values):
         raise ValueError("All values in advanced.assumed_ne_values must be > 0.")
 
-    if float(cfg.advanced.oiii_metallicity_z_over_zsun) <= 0:
+    if uses_outflow_energetics and float(cfg.advanced.oiii_metallicity_z_over_zsun) <= 0:
         raise ValueError("advanced.oiii_metallicity_z_over_zsun must be > 0.")
+
+    if uses_outflow_energetics:
+        for name in (
+            "energetics_flux_uncertainty_fraction",
+            "energetics_density_map_uncertainty_fraction",
+            "energetics_mass_to_light_uncertainty_fraction",
+        ):
+            if float(getattr(cfg.advanced, name)) < 0:
+                raise ValueError(f"advanced.{name} must be >= 0.")
+
+    if uses_outflow_energetics and cfg.advanced.ne_outflow_uncertainty is not None:
+        if cfg.input.ne_outflow is None:
+            raise ValueError("advanced.ne_outflow_uncertainty requires input.ne_outflow.")
+        if not isinstance(cfg.advanced.ne_outflow_uncertainty, list):
+            raise ValueError("advanced.ne_outflow_uncertainty must be null or a list.")
+        if len(cfg.advanced.ne_outflow_uncertainty) != len(cfg.input.ne_outflow):
+            raise ValueError("advanced.ne_outflow_uncertainty must match input.ne_outflow length.")
+        if any(float(x) < 0 for x in cfg.advanced.ne_outflow_uncertainty):
+            raise ValueError("All values in advanced.ne_outflow_uncertainty must be >= 0.")
 
 
 
@@ -385,35 +427,32 @@ def validate_config(cfg: AppConfig) -> None:
     out = cfg.fit.outflow
 
     allowed_disc_modes = {"independent", "disk_kepler", "NSC", "Plummer", "disk_arctan"}
-    if disc.mode not in allowed_disc_modes:
+    if uses_disc and disc.mode not in allowed_disc_modes:
         raise ValueError(f"fit.disc.mode must be one of {sorted(allowed_disc_modes)}.")
 
-    if len(disc.radius_range_arcsec) != 2:
+    if uses_disc and len(disc.radius_range_arcsec) != 2:
         raise ValueError("fit.disc.radius_range_arcsec must have [rmin, rmax].")
 
-    if disc.radius_range_arcsec[1] <= disc.radius_range_arcsec[0]:
+    if uses_disc and disc.radius_range_arcsec[1] <= disc.radius_range_arcsec[0]:
         raise ValueError("fit.disc.radius_range_arcsec must satisfy rmax > rmin.")
 
-    if disc.num_shells < 1:
+    if uses_disc and disc.num_shells < 1:
         raise ValueError("fit.disc.num_shells must be >= 1.")
 
-    if len(disc.beta_grid_deg) != 3:
+    if uses_disc and len(disc.beta_grid_deg) != 3:
         raise ValueError("fit.disc.beta_grid_deg must have [min, max, step].")
 
-    if disc.beta_grid_deg[2] <= 0:
+    if uses_disc and disc.beta_grid_deg[2] <= 0:
         raise ValueError("fit.disc.beta_grid_deg step must be > 0.")
 
-    if out.beta_grid_deg[2] <= 0:
-        raise ValueError("fit.outflow.beta_grid_deg step must be > 0.")
-
-    if disc.mode == "independent":
+    if uses_disc and disc.mode == "independent":
         if len(disc.independent.v_grid_kms) != 3:
             raise ValueError("fit.disc.independent.v_grid_kms must have [min, max, step].")
 
         if disc.independent.v_grid_kms[2] <= 0:
             raise ValueError("fit.disc.independent.v_grid_kms step must be > 0.")
 
-    elif disc.mode == "disk_kepler":
+    elif uses_disc and disc.mode == "disk_kepler":
         if len(disc.kepler.mbh_grid_msun) != 2:
             raise ValueError("fit.disc.kepler.mbh_grid_msun must have [min, max].")
         if disc.kepler.n_geom < 2:
@@ -421,7 +460,7 @@ def validate_config(cfg: AppConfig) -> None:
         if disc.kepler.mbh_grid_msun[0] <= 0 or disc.kepler.mbh_grid_msun[1] <= 0:
             raise ValueError("fit.disc.kepler.mbh_grid_msun values must be > 0 for geomspace.")
 
-    elif disc.mode == "NSC":
+    elif uses_disc and disc.mode == "NSC":
         if disc.nsc.re_pc is None or disc.nsc.re_pc <= 0:
             raise ValueError("fit.disc.nsc.re_pc must be > 0.")
         if len(disc.nsc.a_grid) != 2:
@@ -431,7 +470,7 @@ def validate_config(cfg: AppConfig) -> None:
         if disc.nsc.a_grid[0] <= 0 or disc.nsc.a_grid[1] <= 0:
             raise ValueError("fit.disc.nsc.a_grid values must be > 0 for geomspace.")
 
-    elif disc.mode == "Plummer":
+    elif uses_disc and disc.mode == "Plummer":
         if disc.plummer.a_pc is None or disc.plummer.a_pc <= 0:
             raise ValueError("fit.disc.plummer.a_pc must be > 0.")
         if len(disc.plummer.m0_grid_msun) != 2:
@@ -441,7 +480,7 @@ def validate_config(cfg: AppConfig) -> None:
         if disc.plummer.m0_grid_msun[0] <= 0 or disc.plummer.m0_grid_msun[1] <= 0:
             raise ValueError("fit.disc.plummer.m0_grid_msun values must be > 0 for geomspace.")
 
-    elif disc.mode == "disk_arctan":
+    elif uses_disc and disc.mode == "disk_arctan":
         if disc.arctan.rt_arcsec is None or disc.arctan.rt_arcsec <= 0:
             raise ValueError("fit.disc.arctan.rt_arcsec must be > 0.")
         if len(disc.arctan.vmax_grid_kms) != 3:
@@ -453,32 +492,35 @@ def validate_config(cfg: AppConfig) -> None:
     # --------------------------------
     # Outflow config checks
     # --------------------------------
-    if len(out.radius_range_arcsec) != 2:
+    if uses_outflow and len(out.radius_range_arcsec) != 2:
         raise ValueError("fit.outflow.radius_range_arcsec must have [rmin, rmax].")
 
-    if out.radius_range_arcsec[1] <= out.radius_range_arcsec[0]:
+    if uses_outflow and out.radius_range_arcsec[1] <= out.radius_range_arcsec[0]:
         raise ValueError("fit.outflow.radius_range_arcsec must satisfy rmax > rmin.")
 
-    if out.num_shells < 1:
+    if uses_outflow and out.num_shells < 1:
         raise ValueError("fit.outflow.num_shells must be >= 1.")
 
-    if out.mask_mode not in {"single", "bicone"}:
+    if uses_outflow and out.mask_mode not in {"single", "bicone"}:
         raise ValueError("fit.outflow.mask_mode must be 'single' or 'bicone'.")
 
-    if len(out.beta_grid_deg) != 3:
+    if uses_outflow and len(out.beta_grid_deg) != 3:
         raise ValueError("fit.outflow.beta_grid_deg must have [min, max, step].")
 
-    if len(out.v_grid_kms) != 3:
+    if uses_outflow and out.beta_grid_deg[2] <= 0:
+        raise ValueError("fit.outflow.beta_grid_deg step must be > 0.")
+
+    if uses_outflow and len(out.v_grid_kms) != 3:
         raise ValueError("fit.outflow.v_grid_kms must have [min, max, step].")
-    if out.v_grid_kms[2] <= 0:
+    if uses_outflow and out.v_grid_kms[2] <= 0:
         raise ValueError("fit.outflow.v_grid_kms step must be > 0.")
-    if out.opening_deg <= 0 or out.opening_deg > 180:
+    if uses_outflow and (out.opening_deg <= 0 or out.opening_deg > 180):
         raise ValueError("fit.outflow.opening_deg must be in the range (0, 180].")
 
 
     fit_bicone = (str(out.mask_mode).lower() == "bicone") or bool(out.double_cone)
 
-    if cfg.fit.component_mode in {"outflow", "disk_then_outflow"} and cfg.input.ne_outflow is not None:
+    if uses_outflow_energetics and cfg.input.ne_outflow is not None:
         if fit_bicone and len(cfg.input.ne_outflow) != 2:
             raise ValueError(
                 "For bicone outflow, input.ne_outflow must contain two values: [ne_plus, ne_minus]."
@@ -487,4 +529,3 @@ def validate_config(cfg: AppConfig) -> None:
             raise ValueError(
                 "For single-cone outflow, input.ne_outflow must contain one value: [ne_single]."
             )
-
