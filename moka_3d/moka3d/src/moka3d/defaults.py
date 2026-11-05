@@ -18,6 +18,10 @@ input:
   save_all_outputs: false
   ne_map: null
   ne_outflow: null
+  mass_to_light_map: null
+  mass_to_light_map_ext: 0
+  mass_to_light_units: Msun_per_1e40_erg_s
+  mass_to_light_is_log: false
 
 
 target:
@@ -129,6 +133,10 @@ advanced:
   save_energetics_table: true
   assumed_ne_values: [100.0, 500.0, 1000.0]
   oiii_metallicity_z_over_zsun: 1.0
+  energetics_flux_uncertainty_fraction: 0.05
+  energetics_density_map_uncertainty_fraction: 0.10
+  energetics_mass_to_light_uncertainty_fraction: 0.10
+  ne_outflow_uncertainty: null
 
 
 output:

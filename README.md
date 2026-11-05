@@ -153,6 +153,8 @@ archivePrefix = {arXiv},
 ## Release Notes
 
 - [MOKA3D v0.1](moka_3d/docs/release_notes_v0.1.md)
+- [MOKA3D v0.2](moka_3d/docs/release_notes_v0.2.md)
+
 
 ## License
 This project is licensed under the terms of the [GNU General Public License version 3.0](https://choosealicense.com/licenses/gpl-3.0/) license.
