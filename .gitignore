@@ -5,3 +5,15 @@ __pycache__/
 # Python cache
 __pycache__/
 *.py[cod]
+
+# Workshop datasets and generated outputs
+workshop_NGC5728/data/
+workshop_NGC5728/outputs/
+
+# NGC 5728 workshop: input data and generated outputs
+/workshop_NGC5728/Data/
+/workshop_NGC5728/Ancillary_material/
+/workshop_NGC5728/Outputs/
+
+# Python package installation metadata
+*.egg-info/
