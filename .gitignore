@@ -21,12 +21,15 @@ __pycache__/
 .ipynb_checkpoints/
 
 # Workshop input data and generated results
-workshop_NGC5728/Data/
-workshop_NGC5728/Ancillary_material/
-workshop_NGC5728/Outputs/
+# Ignore workshop data but keep empty folder structure
+workshop_NGC5728/Data/*
+!workshop_NGC5728/Data/.gitkeep
 
+workshop_NGC5728/Ancillary_material/*
+!workshop_NGC5728/Ancillary_material/.gitkeep
 # Python generated metadata
 *.egg-info/
 
 # Temporary editor backup files
 *.save
+/workshop_NGC5728/Outputs/
