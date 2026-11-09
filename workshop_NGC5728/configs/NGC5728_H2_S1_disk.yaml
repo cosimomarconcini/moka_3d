@@ -32,12 +32,12 @@ line:
   wavelength_line_unit: micron          # Angstrom     |    micron  | GHz  \
 
 processing:
-  sn_thresh: 3
-  nrebin: 1
-  xrange: null
+  sn_thresh: 3           #  SN cut
+  nrebin: 1          #  spatial rebinning of the data before the fit
+  xrange: null          #  visual effect, spatial cut of the data to be displayed
   yrange: null
-  pixel_scale_arcsec_manual: null
-  display_ranges:
+  pixel_scale_arcsec_manual: null           #  in case the info about the pixel size is not present in the header
+  display_ranges:           #  values used to display moment maps
     flux:
       mode: percentile                # fixed    |    percentile
       values: [1, 99]
@@ -51,9 +51,9 @@ processing:
       values: [1, 99]
 
   psf_sigma: [0.25]                   # [psf sigma] if simmetric, otherwise [bmaj, bmin, P.A.]
-  lsf_sigma: 53.0
-  vel_sigma: 0.0
-maps:
+  lsf_sigma: 53.0          #  line spread function of the instrument (sigma) in km/s
+  vel_sigma: 0.0          #  additional velocity dispersion to be assigned to the model clouds
+maps:          #  the user can provide already computed moment maps if preferred, to be provided in .fits format
   fluxmap: null
   velmap: null
   sigmap: null
@@ -63,19 +63,19 @@ fit:
   disc:
     mode: independent              # independent | disk_kepler | NSC | Plummer | disk_arctan
 
-    radius_range_arcsec: [0.0, 7]
-    num_shells: 1
+    radius_range_arcsec: [0.0, 7]          #  disc radius in arcsec
+    num_shells: 1           #  number of shells to be fitted independetly
 
-    pa_deg: null
+    pa_deg: null           #  position angle of the disc, measured clockwise from north
     pa_unc_deg: null
 
-    beta_grid_deg: [0, 80, 2]
+    beta_grid_deg: [0, 90, 2]           #  range of inclinaton space probed
 
     independent:
-      v_grid_kms: [0.0, 400.0, 20.0]
+      v_grid_kms: [0.0, 400.0, 20.0]          #  range of circular disc velocity probed
 
     kepler:
-      mbh_grid_msun: [1.0e6, 1.0e11]
+      mbh_grid_msun: [1.0e6, 1.0e11]           #  range of black hole masses probed in kepler motion configuration
       n_geom: 50
 
     nsc:
@@ -94,35 +94,34 @@ fit:
 
 
   outflow:
-    radius_range_arcsec: [0.0, 30]
+    radius_range_arcsec: [0.0, 30]           #  inner and outer outflow radius
     num_shells: 30
-    pa_deg: 110
-    opening_deg: 120
-    double_cone: true
+    pa_deg: 110           #  position angle of the outflow, measured clockwise from north
+    opening_deg: 120           #  total opening angle of the outflow
+    double_cone: true           #  double cone fit configuration, if true both the approaching and receiding cone are fitted
     mask_mode: bicone
 
     beta_grid_deg: [50, 130, 5]
     v_grid_kms: [0.0, 1200.0, 25.0]
 
 advanced:
-  check_masking_before_fitting: true
-  use_crps: false
+  check_masking_before_fitting: true           #  stop the code right before the fit to allow the user to check the spatial masking
+  use_crps: false           #  work in progress, leave false
   perc_disc: [0.01, 0.99]
   perc_out: [0.01, 0.99]
   perc_weights: [1, 1]
 
-  npt: 300000
+  npt: 300000           #  number of model clouds
 
-  use_global_beta_disc: true
-
-  disc_theta_range:
+  use_global_beta_disc: true           #  if true a single average inclination is fitted for the disc fit
+  disc_theta_range:           #  leave it as it is. useful only for outflows but is overwritten by opening_deg
     - [0, 1]
-  disc_phi_range:
+  disc_phi_range:           #  phi parameter space probed, to be used for discs only
     - [0, 360]
   disc_zeta_range_mode: auto_from_psf         # this means thin disk approssimation, i.e. disc_thickness == PSF
 
-  use_global_beta_out: true
-  mask_disk_with_outflow: true
+  use_global_beta_out: true           #  if true, a single inclination for the cone shells is inferred, otherwise provide each shell inclination
+  mask_disk_with_outflow: true           #  only for disc_then_outflow fit, the disc is masked to avoid fitting outflow feature
   do_final_combined_model_plot: true
   outflow_axis_sign: 1
 
@@ -132,7 +131,7 @@ advanced:
 
   compute_energetics: false
   save_energetics_table: false
-  assumed_ne_values: [100.0, 500.0, 1000.0]
+  assumed_ne_values: [100.0, 500.0, 1000.0]           #  if electron density is not provided, these value are used to estimate the outflow mass
   oiii_metallicity_z_over_zsun: 1.0
   energetics_flux_uncertainty_fraction: 0.05
   energetics_density_map_uncertainty_fraction: 0.10
