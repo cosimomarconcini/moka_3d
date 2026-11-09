@@ -2091,41 +2091,7 @@ def run_pipeline(cfg, config_path: Path | None = None) -> dict:
                 npt_total=int(npt)*100,
                 n_shells=num_shells_disc_eff,
                 geometry="cylindrical",
-                radius_range_shells=radius_range_model_disc if num_shells_disc_eff == 1 else radius_shells_disc,
-                theta_range=disc_theta_range,
-                phi_range=disc_phi_range,
-                zeta_range=disc_zeta_range,
-                logradius=logradius,
-                flux_func=flux_func,
-                vel1_func=vel1_func, vel2_func=vel2_func, vel3_func=vel3_func,
-                vel_sigma=vel_sigma,
-                psf_sigma=psf_sigma,
-                lsf_sigma=lsf_sigma,
-                cube_range=cube_range,
-                cube_nbins=cube_nbins,
-                fluxpars=fluxpars,
-                v_arr=v_arr_disc,
-                beta_arr=beta_arr_disc,
-                xycenter=xycenter,
-                alpha=alpha,
-                gamma=gamma_disc_best,
-                vsys=vsys
-            )
-
-
-
-            if USE_GLOBAL_BETA_DISC:
-                beta_arr_disc = [beta_disc_best] * num_shells_disc_eff
-                v_arr_disc    = [v_disc_best]    * num_shells_disc_eff
-            else:
-                beta_arr_disc = list(np.asarray(disc_best2_for_plots["beta"], float))
-                v_arr_disc    = list(np.asarray(disc_best2_for_plots["v"], float))
-
-            m_final = km._make_multishell_component(
-                npt_total=int(npt)*100,
-                n_shells=num_shells_disc_eff,
-                geometry="cylindrical",
-                radius_range_shells=radius_range_model_disc if num_shells_disc_eff == 1 else radius_shells_disc,
+                radius_range_shells=radius_shells_disc,
                 theta_range=disc_theta_range,
                 phi_range=disc_phi_range,
                 zeta_range=disc_zeta_range,

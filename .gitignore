@@ -10,10 +10,23 @@ __pycache__/
 workshop_NGC5728/data/
 workshop_NGC5728/outputs/
 
-# NGC 5728 workshop: input data and generated outputs
-/workshop_NGC5728/Data/
-/workshop_NGC5728/Ancillary_material/
-/workshop_NGC5728/Outputs/
+# Workshop data (downloaded separately)
+/Data/
+/Ancillary_material/
+/Outputs/
 
-# Python package installation metadata
+# Python temporary files
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Workshop input data and generated results
+workshop_NGC5728/Data/
+workshop_NGC5728/Ancillary_material/
+workshop_NGC5728/Outputs/
+
+# Python generated metadata
 *.egg-info/
+
+# Temporary editor backup files
+*.save

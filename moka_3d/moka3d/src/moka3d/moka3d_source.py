@@ -3093,6 +3093,10 @@ def _make_multishell_component(
     v_arr, beta_arr,          # arrays length n_shells
     xycenter, alpha, gamma, vsys
 ):
+    # Normalize radius ranges for a single-shell model.
+    if n_shells == 1 and len(radius_range_shells) == 2 and np.isscalar(radius_range_shells[0]):
+        radius_range_shells = [radius_range_shells]
+
     # Build first shell as base model
     npt_shell = int(npt_total / n_shells)
 
