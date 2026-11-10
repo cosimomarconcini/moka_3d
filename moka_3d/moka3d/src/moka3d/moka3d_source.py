@@ -1,3 +1,4 @@
+import matplotlib
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
@@ -2796,9 +2797,9 @@ def plot_kin_maps_3x3(
     extent0 = [xmin - x0, xmax - x0, ymin - y0, ymax - y0]
 
     # ---------- colormaps ----------
-    cmap_flux_obj = cm.get_cmap(cmap_flux).copy()
-    cmap_vel_obj  = cm.get_cmap(cmap_vel).copy()
-    cmap_sig_obj  = cm.get_cmap(cmap_sig).copy()
+    cmap_flux_obj = matplotlib.colormaps.get_cmap(cmap_flux).copy()
+    cmap_vel_obj  = matplotlib.colormaps.get_cmap(cmap_vel).copy()
+    cmap_sig_obj  = matplotlib.colormaps.get_cmap(cmap_sig).copy()
     for _cmap in (cmap_flux_obj, cmap_vel_obj, cmap_sig_obj):
         _cmap.set_bad(color='white')  # NaNs shown white
 
