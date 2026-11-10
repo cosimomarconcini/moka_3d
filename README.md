@@ -93,6 +93,38 @@ moka3d validate config_moka.yaml
 moka3d run config_moka.yaml
 ```
 
+
+## Quickstart workshop
+
+The example configuration uses relative paths such as `./Data`, so you must run it from inside the `moka3d/` subdirectory.
+
+Run the example end-to-end:
+
+```bash
+git clone https://github.com/cosimomarconcini/moka_3d.git
+cd moka_3d/moka_3d/
+python -m pip install -e ./moka3d
+conda env create -f environment.yml
+conda activate moka3d
+
+# Move into the example directory (required because of relative paths)
+cd ..
+cd workshop_NGC5728/ 
+
+# Remember to put the Data and Ancillary_material within their folder before proceeding
+# Check installation
+moka3d --help
+
+# Validate the bundled example config
+moka3d validate configs/NGC5728_H2_S1_disk.yaml
+
+# Run the bundled example
+moka3d run configs/NGC5728_H2_S1_disk.yaml
+```
+
+
+
+
 The example uses:
 
 - `config_moka.yaml`
